@@ -435,18 +435,21 @@ Usage:
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
-    interaction  join enter it tmux config
+  interaction  join enter it tmux config
   images       prebuild update self-update cache-clean base
-  batch        batch [tmux|stats|list|stop <id>|...]
+  batch        batch [log [id]|tmux|stats|list|stop <id>|...]
   server       server {start|stop|restart|status|logs|build}
+  uninstall    uninstall
 
 Examples:
-    pod config
+  pod config
   pod self-update
   pod start pi dev all all alpine
   pod join pi dev
   pod batch prompts.txt --concurrent
+  pod batch log
   pod server start
+  pod uninstall
   pod --version
 EOF
     }
@@ -514,7 +517,7 @@ EOF
     fi
 
     if [ "$#" -eq 0 ]; then
-        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "server" "base" "cache-clean" "quit")
+        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "server" "base" "cache-clean" "uninstall" "quit")
         local selected_action=""
         
         while true; do
@@ -561,7 +564,7 @@ EOF
                 done
                 ;;
             batch)
-                local batch_options=("run" "tmux" "stats" "list" "stop")
+                local batch_options=("run" "log" "tmux" "stats" "list" "stop")
                 echo -e "\033[36mBatch action:\033[0m"
                 local original_ps3="$PS3"
                 PS3="Action: "
@@ -587,6 +590,7 @@ EOF
                             fi
                             return $?
                             ;;
+                        log) pod batch log; return $? ;;
                         tmux|stats|list) pod batch "$ba"; return $? ;;
                         stop)
                             read -p "Batch id (blank to list): " bid
@@ -750,6 +754,84 @@ EOF
         esac
         _pod_configure_env "$config_mode"
         return $?
+    fi
+
+    if [ "$action" = "uninstall" ]; then
+        echo -e "\033[1;31mUninstall pod-agents-manager\033[0m"
+        echo ""
+        echo -e "\033[36mWhat would you like to remove?\033[0m"
+        echo "  1) Manager only        — removes ~/.pod_agents and the shell rc source line"
+        echo "  2) + Config & images   — also removes ~/.pod_agents_config and all pod images"
+        echo "  3) + All pod volumes   — also removes ~/Developer/*-pods (DESTRUCTIVE: all agent workspaces gone)"
+        echo "  0) Cancel"
+        echo ""
+        local uninstall_level=""
+        while true; do
+            printf 'Choice [0-3]: ' > /dev/tty
+            IFS= read -r uninstall_level < /dev/tty || { echo "Cancelled."; return 0; }
+            case "$uninstall_level" in
+                0) echo "Cancelled."; return 0 ;;
+                1|2|3) break ;;
+                *) echo "Please enter 0, 1, 2, or 3." ;;
+            esac
+        done
+
+        local confirm_msg="Remove pod-agents-manager"
+        [ "$uninstall_level" = "2" ] && confirm_msg="Remove pod-agents-manager + config, cache and images"
+        [ "$uninstall_level" = "3" ] && confirm_msg="Remove EVERYTHING including all pod volumes (DESTRUCTIVE)"
+        _pod_prompt_yes_no "$confirm_msg — are you sure?" "N" || { echo "Cancelled."; return 0; }
+
+        # Level 1: manager script + shell rc source line
+        echo -e "\033[33mRemoving ~/.pod_agents...\033[0m"
+        rm -f "$HOME/.pod_agents"
+        local _source_line='[ -f "$HOME/.pod_agents" ] && source "$HOME/.pod_agents"'
+        local _rcfile
+        for _rcfile in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+            [ -f "$_rcfile" ] || continue
+            if grep -qF "$_source_line" "$_rcfile"; then
+                grep -vF "$_source_line" "$_rcfile" > "${_rcfile}.pod_uninstall_bak"
+                mv "${_rcfile}.pod_uninstall_bak" "$_rcfile"
+                echo -e "\033[33mRemoved source line from $_rcfile\033[0m"
+            fi
+        done
+
+        if [ "$uninstall_level" -ge 2 ]; then
+            echo -e "\033[33mRemoving $config_dir_root...\033[0m"
+            rm -rf "$config_dir_root"
+            echo -e "\033[33mRemoving pod agent container images...\033[0m"
+            podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+                | grep '^localhost/.*-agent-' \
+                | while IFS= read -r _img; do
+                    podman image rm -f "$_img" 2>/dev/null && echo "  Removed image: $_img" || true
+                done
+        fi
+
+        if [ "$uninstall_level" -ge 3 ]; then
+            echo -e "\033[31mStopping all pod services and removing pod volumes...\033[0m"
+            local _u_agent _u_inst
+            for _u_agentdir in "$HOME/Developer/"*-pods; do
+                [ -d "$_u_agentdir" ] || continue
+                _u_agent="$(basename "$_u_agentdir" | sed 's/-pods$//')"
+                for _u_instdir in "$_u_agentdir"/*/; do
+                    [ -d "$_u_instdir" ] || continue
+                    _u_inst=$(basename "$_u_instdir")
+                    systemctl --user disable --now "${_u_agent}@${_u_inst}.service" 2>/dev/null || true
+                done
+                rm -f "$HOME/.config/containers/systemd/${_u_agent}@.container" 2>/dev/null || true
+                rm -rf "$_u_agentdir"
+                echo "  Removed: $_u_agentdir"
+            done
+            systemctl --user daemon-reload 2>/dev/null || true
+        fi
+
+        echo ""
+        echo -e "\033[32mUninstall complete.\033[0m"
+        case "$uninstall_level" in
+            1) echo "  Tip: config and pod data in ~/.pod_agents_config and ~/Developer/*-pods are still intact." ;;
+            2) echo "  Tip: pod workspace volumes in ~/Developer/*-pods are still intact." ;;
+            3) echo "  All pod-agents-manager data has been removed from this system." ;;
+        esac
+        return 0
     fi
 
     if [ "$action" = "base" ]; then
@@ -1046,6 +1128,21 @@ EOF
                     echo -e "\033[33mNo active batch runners.\033[0m"
                     return 0
                 fi
+                if ! command -v tmux >/dev/null 2>&1; then
+                    echo -e "\033[31mtmux is not installed on this host.\033[0m"
+                    echo -e "  Install:  \033[36msudo apt install tmux\033[0m  (or your distro equivalent)"
+                    echo ""
+                    echo -e "\033[33mFollowing active batch logs instead (Ctrl+C to stop):\033[0m"
+                    local _fb_files=()
+                    for _fb_entry in "${panes[@]}"; do
+                        local _fb_lf="${_fb_entry##*|}"
+                        echo -e "  \033[36m${_fb_entry%%|*}\033[0m  →  $_fb_lf"
+                        _fb_files+=("$_fb_lf")
+                    done
+                    echo ""
+                    tail -F "${_fb_files[@]}" 2>/dev/null
+                    return 0
+                fi
                 local session="batches"
                 tmux kill-session -t "$session" 2>/dev/null || true
                 local i
@@ -1068,6 +1165,42 @@ EOF
                     tmux switch-client -t "$session"
                 else
                     tmux attach-session -t "$session"
+                fi
+                return 0
+                ;;
+            log)
+                local _lid="${3:-}"
+                if [ -z "$_lid" ]; then
+                    _lid=$(ls -1t "$batch_root" 2>/dev/null | head -n 1)
+                fi
+                if [ -z "$_lid" ]; then
+                    echo -e "\033[33mNo batches found.\033[0m"
+                    return 0
+                fi
+                local _ld="$batch_root/$_lid"
+                [ -d "$_ld" ] || { echo -e "\033[31mBatch not found: $_lid\033[0m"; return 1; }
+                echo -e "\033[1;36mBatch $_lid\033[0m"
+                local _batch_log_files=()
+                for _lf in "$_ld/logs/"*.log; do
+                    [ -f "$_lf" ] || continue
+                    [[ "$(basename "$_lf")" == *.runner.log ]] && continue
+                    _batch_log_files+=("$_lf")
+                done
+                if [ ${#_batch_log_files[@]} -eq 0 ]; then
+                    echo -e "\033[33mNo log files found.\033[0m"
+                    return 0
+                fi
+                local _all_done=1
+                for _lf in "${_batch_log_files[@]}"; do
+                    local _tgt_base; _tgt_base=$(basename "$_lf" .log)
+                    [ -f "$_ld/done.${_tgt_base}" ] || _all_done=0
+                done
+                if [ "$_all_done" = "0" ]; then
+                    echo -e "\033[33mBatch still running — following log (Ctrl+C to stop):\033[0m"
+                    echo ""
+                    tail -F "${_batch_log_files[@]}" 2>/dev/null
+                else
+                    cat "${_batch_log_files[@]}"
                 fi
                 return 0
                 ;;
@@ -1150,7 +1283,7 @@ Usage:
   pod batch <prompts.txt>                       # all running pods
   pod batch <agent> <prompts.txt>               # all running pods of one agent
   pod batch <agent> <instance> <prompts.txt>    # one specific pod
-  pod batch tmux | stats | list | stop [id]
+  pod batch log [id]   | tmux | stats | list | stop [id]
   Optional flag: --concurrent  (per-pod parallelism instead of sequential)
 USAGE
                 return 1
@@ -1196,6 +1329,7 @@ USAGE
             echo "total=$total"
             echo "targets=${targets[*]}"
             echo "source=$prompts_file"
+            echo "pod_manager_version=${POD_AGENTS_VERSION:-unknown}"
         } > "$batch_dir/meta.conf"
 
         local tgt
@@ -1227,6 +1361,7 @@ batch_dir=$(printf '%q' "$batch_dir")
 container=$(printf '%q' "$tgt")
 total=$total
 concurrent=$concurrent
+pod_manager_version=$(printf '%q' "${POD_AGENTS_VERSION:-unknown}")
 prog_file="\$batch_dir/progress/${tgt}.prog"
 log_file="\$batch_dir/logs/${tgt}.log"
 prompts="\$batch_dir/prompts.txt"
@@ -1236,6 +1371,20 @@ write_progress() {
     local v="\$1"
     printf '%s\n' "\$v" > "\$prog_file.tmp" && mv -f "\$prog_file.tmp" "\$prog_file"
 }
+
+# Write session header to log
+{
+    echo "==================================================================="
+    echo "  Batch:   \$( basename "\$batch_dir" )"
+    echo "  Pod:     \$container"
+    echo "  Started: \$(date -Iseconds 2>/dev/null || date)"
+    echo "  Image:   \$(podman inspect --format '{{.Config.Image}}' "\$container" 2>/dev/null || echo 'unknown')"
+    echo "  Model:   \$(podman exec "\$container" bash -lc 'echo "\${LLM:-\${DEFAULT_MODEL:-unknown}}"' 2>/dev/null | tail -n1 || echo 'unknown')"
+    echo "  Manager: \$pod_manager_version"
+    echo "  Prompts: \$total  (concurrent=\$concurrent)"
+    echo "==================================================================="
+    echo ""
+} >> "\$log_file"
 
 write_progress "0/\$total"
 
@@ -1265,6 +1414,15 @@ if [ "\$concurrent" = "1" ]; then
 fi
 
 date -Iseconds > "\$batch_dir/done.${tgt}" 2>/dev/null || date > "\$batch_dir/done.${tgt}"
+
+# Write session footer to log
+{
+    echo ""
+    echo "==================================================================="
+    echo "  Batch complete: \$( basename "\$batch_dir" )"
+    echo "  Finished: \$(date -Iseconds 2>/dev/null || date)"
+    echo "==================================================================="
+} >> "\$log_file"
 RUNNER
             chmod +x "$runner"
             nohup "$runner" >"$batch_dir/logs/${tgt}.runner.log" 2>&1 < /dev/null &
@@ -1487,6 +1645,19 @@ EOF
                 return 1
             fi
 
+            if ! command -v tmux >/dev/null 2>&1; then
+                echo -e "\033[31mtmux is not installed on this host.\033[0m"
+                echo -e "  Install:  \033[36msudo apt install tmux\033[0m  (or your distro equivalent)"
+                echo ""
+                echo -e "\033[33mRunning pods:\033[0m"
+                for _tp in "${target_pods[@]}"; do
+                    echo "  ${_tp%:*}-${_tp#*:}"
+                done
+                echo ""
+                echo -e "  Use \033[36mpod join <agent> <instance>\033[0m to connect to a pod directly."
+                return 1
+            fi
+
             local session_name="fleet_${target_instance:-grid_all}"
             
             # Kill existing session by this name if we are regenerating it
@@ -1669,4 +1840,4 @@ EOF
             ;;
     esac
 }
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean quit help version --help --version -h -v" pod
+complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean uninstall quit help version --help --version -h -v" pod
