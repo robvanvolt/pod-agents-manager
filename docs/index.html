@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pod Agents Manager - Rootless AI Agent Fleets</title>
+  <meta name="description" content="A rootless Podman and Quadlet fleet manager for running, orchestrating, and monitoring local AI coding agents.">
+  <meta name="theme-color" content="#101827">
+  <meta property="og:title" content="Pod Agents Manager">
+  <meta property="og:description" content="Run local AI coding agents as rootless Podman containers with Quadlet, tmux, batch prompts, and a LAN dashboard.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://robvanvolt.github.io/pod-agents-manager/">
+  <meta property="og:image" content="https://robvanvolt.github.io/pod-agents-manager/social-card.svg">
+  <link rel="canonical" href="https://robvanvolt.github.io/pod-agents-manager/">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-elevate>
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Pod Agents Manager home">
+        <span class="brand-mark" aria-hidden="true">
+          <span class="brand-mark-core"></span>
+        </span>
+        <span>
+          <strong>Pod Agents Manager</strong>
+          <small>rootless AI agent fleets</small>
+        </span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span>Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="#commands">Commands</a>
+        <a href="#plugins">Plugins</a>
+        <a href="#dashboard">Dashboard</a>
+        <a class="github-link" href="https://github.com/robvanvolt/pod-agents-manager">GitHub</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero section" id="top">
+      <div class="hero-copy">
+        <div class="eyebrow">
+          <span class="status-dot"></span>
+          Rootless Podman + Quadlet for local AI coding agents
+        </div>
+        <h1>Run a disciplined fleet of local coding agents from one Bash function.</h1>
+        <p class="hero-lede">
+          Pod Agents Manager turns any Linux box with rootless Podman into a multi-agent workstation for Claude Code,
+          OpenCode, Crush, Pi, Hermes, Nanocoder, Little-Coder, and any custom agent you wrap.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#install">Get started</a>
+          <a class="button secondary" href="https://github.com/robvanvolt/pod-agents-manager">View source</a>
+        </div>
+        <div class="badges" aria-label="Project metadata">
+          <span>Apache 2.0</span>
+          <span>Bash</span>
+          <span>Podman</span>
+          <span>Go dashboard</span>
+        </div>
+      </div>
+
+      <aside class="hero-card" aria-label="Quick command preview">
+        <div class="terminal-bar">
+          <span></span><span></span><span></span>
+        </div>
+        <pre><code>git clone https://github.com/robvanvolt/pod-agents-manager.git
+cd pod-agents-manager
+
+cp .pod_agents ~/
+cp -r .pod_agents_config ~/
+echo '[ -f "$HOME/.pod_agents" ] &amp;&amp; source "$HOME/.pod_agents"' &gt;&gt; ~/.bashrc
+exec bash -l
+
+pod start pi dev
+pod tmux
+pod server start</code></pre>
+      </aside>
+    </section>
+
+    <section class="section trust-strip" aria-label="Project highlights">
+      <div>
+        <strong>No daemon</strong>
+        <span>One sourced Bash function drives Podman and systemd user units.</span>
+      </div>
+      <div>
+        <strong>Per-pod isolation</strong>
+        <span>Each agent instance gets its own container image, config, and persistent workspace.</span>
+      </div>
+      <div>
+        <strong>Fleet control</strong>
+        <span>Start, join, batch-prompt, mirror, update, and delete pods from one CLI.</span>
+      </div>
+    </section>
+
+    <section class="section split" id="features">
+      <div>
+        <p class="section-kicker">Why it exists</p>
+        <h2>Local agents are powerful. Fleets need structure.</h2>
+        <p>
+          Pod Agents Manager keeps every coding agent reproducible, observable, and disposable without sacrificing the
+          simplicity of a shell-native workflow. Quadlet generates the systemd units, Podman runs containers rootlessly,
+          and your workspaces stay on the host where they belong.
+        </p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>Pluggable agents</h3>
+          <p>Drop a shell plugin into <code>~/.pod_agents_config/agents/</code>. It is auto-discovered and gets its own CLI verb.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Composable images</h3>
+          <p>Layer optional flavors such as <code>bun</code> or <code>uv</code> onto Alpine or Debian-based Node images.</p>
+        </article>
+        <article class="feature-card">
+          <h3>tmux observability</h3>
+          <p>Open a tiled grid with one pane per running pod for live terminal telemetry across the whole fleet.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Batch prompting</h3>
+          <p>Fan prompt files across running pods sequentially or concurrently with resumable progress and logs.</p>
+        </article>
+        <article class="feature-card">
+          <h3>Shared skills</h3>
+          <p>Mount one skills directory read-only into every pod, then symlink it into each agent's native location.</p>
+        </article>
+        <article class="feature-card">
+          <h3>LAN dashboard</h3>
+          <p>Run a small Go web UI on the host for stats, starts, stops, restarts, deletes, and new pod creation.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section architecture" id="architecture">
+      <div class="section-heading">
+        <p class="section-kicker">Architecture</p>
+        <h2>Systemd-native containers, managed from your user account.</h2>
+      </div>
+      <div class="architecture-panel">
+        <div class="arch-column">
+          <h3>Host</h3>
+          <ul>
+            <li><code>~/.pod_agents</code> sourced as the <code>pod</code> function</li>
+            <li><code>~/.pod_agents_config/defaults.conf</code> for model and endpoint defaults</li>
+            <li><code>~/.config/containers/systemd/*.container</code> Quadlet templates</li>
+            <li><code>~/Developer/&lt;agent&gt;-pods/&lt;instance&gt;/</code> persistent workspaces</li>
+          </ul>
+        </div>
+        <div class="arch-flow" aria-hidden="true">
+          <span>pod start</span>
+          <span>Quadlet</span>
+          <span>systemd --user</span>
+          <span>rootless Podman</span>
+        </div>
+        <div class="arch-column">
+          <h3>Pod</h3>
+          <ul>
+            <li>Agent-specific image built from the selected base and flavor</li>
+            <li><code>/workspace</code> mounted to the host project directory</li>
+            <li><code>/srv/skills</code> mounted read-only from shared skills</li>
+            <li>OpenAI-compatible endpoint injected through environment variables</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="section install" id="install">
+      <div class="section-heading">
+        <p class="section-kicker">Install</p>
+        <h2>Copy two paths, source one function, start a pod.</h2>
+        <p>Requirements: Linux, Bash 4+, rootless Podman, systemd user services, and an OpenAI-compatible inference endpoint.</p>
+      </div>
+      <div class="steps">
+        <article class="step-card">
+          <span class="step-number">01</span>
+          <h3>Install the CLI and config tree</h3>
+          <pre><code>git clone https://github.com/robvanvolt/pod-agents-manager.git
+cd pod-agents-manager
+cp .pod_agents ~/
+cp -r .pod_agents_config ~/</code></pre>
+        </article>
+        <article class="step-card">
+          <span class="step-number">02</span>
+          <h3>Load the <code>pod</code> function</h3>
+          <pre><code>echo '[ -f "$HOME/.pod_agents" ] &amp;&amp; source "$HOME/.pod_agents"' &gt;&gt; ~/.bashrc
+exec bash -l</code></pre>
+        </article>
+        <article class="step-card">
+          <span class="step-number">03</span>
+          <h3>Configure your inference server</h3>
+          <pre><code>$EDITOR ~/.pod_agents_config/defaults.conf
+pod prebuild
+pod start pi dev</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section quickstart" id="quickstart">
+      <div class="quickstart-card">
+        <div>
+          <p class="section-kicker">Quickstart</p>
+          <h2>A useful first session takes seconds after setup.</h2>
+        </div>
+        <div class="command-list">
+          <div>
+            <code>pod start pi dev</code>
+            <span>Start a Pi coding agent instance named <strong>dev</strong>.</span>
+          </div>
+          <div>
+            <code>pod join pi dev</code>
+            <span>Attach to the agent's tmux session.</span>
+          </div>
+          <div>
+            <code>pod tmux</code>
+            <span>Watch every running pod in a tiled grid.</span>
+          </div>
+          <div>
+            <code>pod batch prompts.txt --concurrent</code>
+            <span>Run prompt files across the active fleet.</span>
+          </div>
+          <div>
+            <code>pod server start</code>
+            <span>Launch the LAN dashboard on <code>0.0.0.0:1337</code>.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="commands">
+      <div class="section-heading">
+        <p class="section-kicker">Command surface</p>
+        <h2>One positional contract across the CLI.</h2>
+        <p>Every action accepts the same shape: <code>pod &lt;action&gt; [agent] [instance] [flavor] [volumes] [base]</code>.</p>
+      </div>
+      <div class="command-grid">
+        <article>
+          <h3>Lifecycle</h3>
+          <p><code>start</code>, <code>stop</code>, <code>restart</code>, <code>status</code>, <code>stats</code>, <code>remove</code>, <code>delete</code></p>
+        </article>
+        <article>
+          <h3>Images</h3>
+          <p><code>prebuild</code>, <code>update</code>, <code>cache-clean</code>, <code>base</code></p>
+        </article>
+        <article>
+          <h3>Interaction</h3>
+          <p><code>join</code>, <code>enter</code>, <code>it</code>, <code>tmux</code></p>
+        </article>
+        <article>
+          <h3>Batch</h3>
+          <p><code>batch</code>, <code>batch tmux</code>, <code>batch stats</code>, <code>batch list</code>, <code>batch stop</code></p>
+        </article>
+        <article>
+          <h3>Dashboard</h3>
+          <p><code>server start</code>, <code>server stop</code>, <code>server restart</code>, <code>server logs</code>, <code>server build</code></p>
+        </article>
+        <article>
+          <h3>Discovery</h3>
+          <p>Agents, flavors, volume bundles, and skills are discovered directly from the config tree.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section split" id="plugins">
+      <div>
+        <p class="section-kicker">Agent plugins</p>
+        <h2>Wrap any CLI agent with a small shell file.</h2>
+        <p>
+          A plugin defines where the agent stores config, how its image is built, and optionally how batch mode should
+          invoke one prompt. No registry, service restart, or project scaffolding is required.
+        </p>
+      </div>
+      <div class="code-card">
+        <div class="code-card-head">
+          <span>~/.pod_agents_config/agents/my-agent.sh</span>
+          <button class="copy-button" type="button" data-copy-target="plugin-example">Copy</button>
+        </div>
+        <pre><code id="plugin-example">AGENT_VOLUME_CONFIG_PATH="/root/.config/my-agent"
+AGENT_SKILLS_SUBPATH="agent/skills"
+AGENT_BATCH_INVOKE='my-agent --print "$PROMPT"'
+
+agent_build_containerfile() {
+    local build_dir="$1"; local flavor="$2"; local base="$3"
+    write_base_node_containerfile "$build_dir" "$flavor" "$base"
+    cat &lt;&lt;'EOF' &gt;&gt; "$build_dir/Containerfile"
+RUN npm install -g my-agent &amp;&amp; npm cache clean --force
+CMD ["tail", "-f", "/dev/null"]
+EOF
+}
+
+agent_generate_config() {
+    local config_dir="$1"; local action="$2"
+    [ "$action" = "update" ] &amp;&amp; return 0
+    cat &lt;&lt;EOF &gt; "$config_dir/config.json"
+{ "baseUrl": "$OPENAI_BASE_URL", "model": "$DEFAULT_MODEL" }
+EOF
+}</code></pre>
+      </div>
+    </section>
+
+    <section class="section dashboard" id="dashboard">
+      <div class="section-heading">
+        <p class="section-kicker">Dashboard</p>
+        <h2>Fleet controls over the LAN, without container gymnastics.</h2>
+        <p>
+          <code>pod server start</code> builds a static Go binary, runs it on the host, and exposes JSON APIs that talk
+          to your real rootless Podman environment.
+        </p>
+      </div>
+      <div class="dashboard-preview" aria-label="Dashboard capabilities">
+        <div class="preview-window">
+          <div class="terminal-bar">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="stats-row header">
+            <span>Name</span><span>CPU</span><span>Memory</span><span>Actions</span>
+          </div>
+          <div class="stats-row">
+            <strong>pi-dev</strong><span>12.4%</span><span>1.8GB</span><span>restart stop delete</span>
+          </div>
+          <div class="stats-row">
+            <strong>claude-alpha</strong><span>8.1%</span><span>2.2GB</span><span>restart stop delete</span>
+          </div>
+          <div class="preview-form">
+            <span>Create new pod</span>
+            <button type="button">Start pod</button>
+          </div>
+        </div>
+        <div class="api-list">
+          <h3>Included APIs</h3>
+          <p><code>GET /api/stats</code> for cached <code>podman stats</code> JSON.</p>
+          <p><code>GET /api/agents</code> for live agents, flavors, volumes, and bases.</p>
+          <p><code>POST /api/action</code> for safe lifecycle operations.</p>
+          <p><code>POST /api/create</code> for new pod creation from the browser.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section split" id="batch">
+      <div>
+        <p class="section-kicker">Batch processing</p>
+        <h2>Send prompt files across the fleet and keep the logs.</h2>
+        <p>
+          Batch mode copies the prompt file, creates detached runners, records progress per pod, and stores combined or
+          per-prompt logs under <code>~/.pod_agents_config/batch/&lt;id&gt;/</code>.
+        </p>
+      </div>
+      <div class="batch-panel">
+        <pre><code>pod batch prompts.txt
+pod batch pi prompts.txt
+pod batch pi dev prompts.txt --concurrent
+
+pod batch tmux
+pod batch stats
+pod batch stop 20260430-120000</code></pre>
+      </div>
+    </section>
+
+    <section class="section footer-cta">
+      <div>
+        <p class="section-kicker">Open source</p>
+        <h2>Designed to be read, modified, and extended.</h2>
+        <p>
+          The project is Apache 2.0 licensed and intentionally small: a Bash function, agent plugins, Containerfile
+          snippets, and a Go dashboard you can inspect in one sitting.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <a class="button primary" href="https://github.com/robvanvolt/pod-agents-manager">Star on GitHub</a>
+        <a class="button secondary" href="https://github.com/robvanvolt/pod-agents-manager/issues">Report an issue</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>Pod Agents Manager is licensed under Apache 2.0.</p>
+    <p><a href="https://github.com/robvanvolt/pod-agents-manager">GitHub</a> <span aria-hidden="true">/</span> <a href="#top">Back to top</a></p>
+  </footer>
+
+  <script src="./script.js"></script>
+</body>
+</html>

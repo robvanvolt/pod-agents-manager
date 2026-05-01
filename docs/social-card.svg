@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Pod Agents Manager</title>
+  <desc id="desc">Rootless AI agent fleets with Podman and Quadlet.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#080d16"/>
+      <stop offset="0.56" stop-color="#0d1728"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#68e1fd"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="36" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.41 0 0 0 0 0.88 0 0 0 0 0.99 0 0 0 .65 0"/>
+      <feBlend in="SourceGraphic"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="170" cy="70" r="260" fill="#68e1fd" opacity=".14"/>
+  <circle cx="1030" cy="120" r="300" fill="#a78bfa" opacity=".16"/>
+  <g opacity=".16">
+    <path d="M0 110h1200M0 220h1200M0 330h1200M0 440h1200M0 550h1200" stroke="#94a3b8"/>
+    <path d="M110 0v630M220 0v630M330 0v630M440 0v630M550 0v630M660 0v630M770 0v630M880 0v630M990 0v630M1100 0v630" stroke="#94a3b8"/>
+  </g>
+  <g transform="translate(86 102)" filter="url(#glow)">
+    <rect width="130" height="130" rx="34" fill="#101827" stroke="#68e1fd" stroke-opacity=".55" stroke-width="3"/>
+    <circle cx="43" cy="58" r="12" fill="#68e1fd"/>
+    <circle cx="87" cy="58" r="12" fill="#68e1fd"/>
+    <rect x="42" y="88" width="46" height="13" rx="7" fill="#34d399"/>
+  </g>
+  <text x="86" y="305" fill="#eef5ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="800" letter-spacing="-3">
+    Pod Agents Manager
+  </text>
+  <text x="90" y="370" fill="#c4d0e4" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="34" font-weight="500">
+    Rootless AI agent fleets with Podman + Quadlet.
+  </text>
+  <g transform="translate(90 445)" fill="none" stroke="#94a3b8" stroke-opacity=".35">
+    <rect width="162" height="46" rx="23"/>
+    <rect x="182" width="116" height="46" rx="23"/>
+    <rect x="318" width="142" height="46" rx="23"/>
+    <rect x="480" width="178" height="46" rx="23"/>
+  </g>
+  <g fill="#d9f7ff" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="20" font-weight="700">
+    <text x="116" y="475">Apache 2.0</text>
+    <text x="216" y="475">Bash</text>
+    <text x="350" y="475">Podman</text>
+    <text x="514" y="475">Go dashboard</text>
+  </g>
+</svg>

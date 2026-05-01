@@ -7,6 +7,7 @@
 **A rootless Podman + Quadlet fleet manager for running and orchestrating local AI coding agents.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-68e1fd.svg)](https://robvanvolt.github.io/pod-agents-manager/)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-1f425f.svg)](https://www.gnu.org/software/bash/)
 [![Container: Podman](https://img.shields.io/badge/Container-Podman-892ca0.svg)](https://podman.io/)
 [![Status: Active](https://img.shields.io/badge/Status-Active-success.svg)]()
@@ -16,6 +17,8 @@
 ---
 
 `pod` is a single-file Bash function that turns any Linux box with rootless Podman into a multi-tenant home for local coding agents — Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and anything else you wrap. Each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
+
+Full project documentation is available at **[robvanvolt.github.io/pod-agents-manager](https://robvanvolt.github.io/pod-agents-manager/)**.
 
 A small Go-backed web dashboard exposes the same control surface over the LAN — including a "create new pod" form, live `podman stats`, and one-click start/stop/restart/delete.
 

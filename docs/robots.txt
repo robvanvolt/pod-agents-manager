@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://robvanvolt.github.io/pod-agents-manager/sitemap.xml
