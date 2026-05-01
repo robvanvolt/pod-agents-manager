@@ -5,6 +5,7 @@ agent_build_containerfile() {
     local flavor="$2"
     write_base_node_containerfile "$build_dir" "$flavor"
     cat <<'EOF' >> "$build_dir/Containerfile"
+RUN apk add --no-cache gcompat
 RUN npm install -g @charmland/crush && npm cache clean --force
 CMD ["tail", "-f", "/dev/null"]
 EOF

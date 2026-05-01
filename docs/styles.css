@@ -160,34 +160,18 @@ pre code {
 }
 
 .brand-mark {
-  position: relative;
-  display: grid;
-  width: 2.8rem;
-  height: 2.8rem;
-  place-items: center;
-  border: 1px solid rgba(104, 225, 253, 0.35);
-  border-radius: 0.85rem;
-  background:
-    linear-gradient(135deg, rgba(104, 225, 253, 0.26), rgba(167, 139, 250, 0.18)),
-    rgba(16, 24, 39, 0.9);
-  box-shadow: 0 10px 30px rgba(104, 225, 253, 0.13);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
 }
 
 .brand-mark img {
-  width: 1.8rem;
-  height: 1.8rem;
+  width: 2.2rem;
+  height: 2.2rem;
   object-fit: contain;
-  filter: grayscale(1) brightness(1.95) contrast(1.2);
-}
-
-.brand-mark::after {
-  position: absolute;
-  inset: 0.24rem;
-  border-radius: 0.65rem;
-  content: "";
-  background: linear-gradient(145deg, rgba(104, 225, 253, 0.48), rgba(167, 139, 250, 0.46));
-  mix-blend-mode: screen;
-  pointer-events: none;
+  filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(104, 225, 253, 0.8)) drop-shadow(0 0 16px rgba(104, 225, 253, 0.35));
 }
 
 .nav-links {

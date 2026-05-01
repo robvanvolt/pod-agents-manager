@@ -23,10 +23,12 @@
     body {
       margin: 0;
       min-width: 320px;
+      min-height: 100vh;
       background:
         radial-gradient(circle at 10% 0%, rgba(104, 225, 253, 0.16), transparent 34rem),
         radial-gradient(circle at 90% 8%, rgba(167, 139, 250, 0.18), transparent 32rem),
         linear-gradient(180deg, #080d16 0%, #0b1220 46%, #080d16 100%);
+      background-attachment: fixed;
       color: var(--text);
       font-family: Inter, system-ui, sans-serif;
       padding: 1.25rem;
@@ -40,16 +42,12 @@
     }
     .brand { display: inline-flex; align-items: center; gap: .75rem; }
     .brand-mark {
-      position: relative; display: grid; place-items: center;
-      width: 2.45rem; height: 2.45rem; border-radius: .8rem;
-      border: 1px solid rgba(104,225,253,.35);
-      background: linear-gradient(135deg, rgba(104,225,253,.26), rgba(167,139,250,.18)), rgba(16,24,39,.9);
+      display: flex; align-items: center; justify-content: center;
+      width: 2.2rem; height: 2.2rem;
     }
-    .brand-mark img { width: 1.55rem; height: 1.55rem; filter: grayscale(1) brightness(2) contrast(1.2); }
-    .brand-mark::after {
-      position: absolute; inset: .2rem; border-radius: .62rem; content: "";
-      background: linear-gradient(145deg, rgba(104,225,253,.48), rgba(167,139,250,.46));
-      mix-blend-mode: screen;
+    .brand-mark img {
+      width: 2.2rem; height: 2.2rem; object-fit: contain;
+      filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(104,225,253,.8)) drop-shadow(0 0 16px rgba(104,225,253,.35));
     }
     h1 { margin: 0; font-size: 1.08rem; letter-spacing: -.02em; }
     .meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
@@ -189,15 +187,25 @@
       return c[fallback] || '-';
     };
 
+    let _infoStatic = '';
+
     async function fetchInfo() {
       try {
         const res = await fetch('/api/info');
         const data = await res.json();
         const ips = (data.ips || []).map(ip => `<code>${ip}</code>`).join(' ');
         const version = data.version ? `version: <code>${data.version}</code> &middot; ` : '';
-        document.getElementById('meta').innerHTML =
-          `${version}host: <code>${data.hostname}</code> &middot; ${ips} &middot; ${new Date(data.time).toLocaleTimeString()}`;
+        _infoStatic = `${version}host: <code>${data.hostname}</code> &middot; ${ips}`;
+        updateClock();
       } catch (_) {}
+    }
+
+    function updateClock() {
+      const el = document.getElementById('meta');
+      if (!el) return;
+      const time = new Date().toLocaleTimeString();
+      el.innerHTML = _infoStatic ? `${_infoStatic} &middot; ${time}` : time;
+    }
     }
 
     async function fetchStats() {
@@ -344,6 +352,7 @@
     loadAgentOptions();
     setInterval(fetchStats, 3000);
     setInterval(fetchInfo, 30000);
+    setInterval(updateClock, 1000);
   </script>
 </body>
 </html>

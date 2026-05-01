@@ -1064,6 +1064,10 @@ EOF
                     done < <(_pod_server_ips)
                 else
                     echo -e "\033[33mNot running\033[0m"
+                    echo ""
+                    echo -e "  \033[36mpod server start\033[0m    — build & start the dashboard on :${server_port}"
+                    echo -e "  \033[36mpod server build\033[0m    — (re)build the Go binary without starting"
+                    echo -e "  \033[36mpod server logs\033[0m     — follow the server log file"
                 fi
                 return 0
                 ;;
