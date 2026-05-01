@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pod Dashboard</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; margin: 20px; background:#111; color:#eee; }
+    h1 { margin: 0 0 4px 0; }
+    .meta { font-size: 12px; opacity: .7; margin-bottom: 12px; }
+    table { width:100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border:1px solid #333; padding:6px 8px; text-align:left; vertical-align: middle; }
+    th { background:#1d1d1d; position: sticky; top: 0; }
+    tr:nth-child(even) { background:#171717; }
+    button { background:#1f1f1f; color:#eee; border:1px solid #444; border-radius:6px; padding:5px 9px; cursor:pointer; font-size: 12px; }
+    button:hover { border-color:#888; }
+    .danger { border-color:#a33; color:#f99; }
+    .danger:hover { border-color:#f55; }
+    .inline { display:inline-flex; gap:4px; flex-wrap:wrap; }
+    .toast { position: fixed; top: 20px; right: 20px; padding: 10px 14px; border-radius: 6px; display: none; max-width: 420px; word-wrap: break-word; }
+    .ok { background: #1f4; color: #042; }
+    .err { background: #f55; color: #210; }
+    .heat-wrap { position: relative; min-height: 1.2em; min-width: 60px; padding: 2px 6px; }
+    .heat-fill { position:absolute; top:0; bottom:0; left:0; border-radius:3px; }
+    .heat-text { position:relative; z-index:1; }
+    code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .85; }
+    .card { margin-top: 22px; padding: 14px 16px; border:1px solid #333; border-radius: 8px; background:#161616; }
+    .card h2 { margin: 0 0 10px 0; font-size: 15px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .grid label { display: block; font-size: 12px; opacity: .85; margin-bottom: 4px; }
+    .grid input, .grid select { width: 100%; box-sizing: border-box; background:#1f1f1f; color:#eee; border:1px solid #444; border-radius:6px; padding:6px 8px; font-size: 13px; }
+    .actions-row { margin-top: 12px; display:flex; gap:8px; align-items:center; }
+    .actions-row button { padding: 7px 14px; font-size: 13px; }
+    .actions-row .primary { background: #1c4; color: #021; border-color: #1f5; }
+    .actions-row .primary:hover { border-color: #2f8; }
+    .out { margin-top: 10px; max-height: 220px; overflow:auto; background:#0c0c0c; border:1px solid #222; border-radius:6px; padding:8px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; display:none; }
+  </style>
+</head>
+<body>
+  <h1>Pod Dashboard</h1>
+  <div class="meta" id="meta">Loading…</div>
+  <div id="toast" class="toast"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Name</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
+        <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="stats-body">
+      <tr><td colspan="9">Loading stats…</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card">
+    <h2>Create new pod</h2>
+    <form id="create-form" onsubmit="return submitCreate(event)">
+      <div class="grid">
+        <div><label>Agent</label><select name="agent" id="f-agent" required></select></div>
+        <div><label>Instance <span style="opacity:.6">(blank = auto)</span></label><input name="instance" id="f-instance" placeholder="dev, alpha, …"></div>
+        <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
+        <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
+        <div><label>Base image</label><select name="base" id="f-base"></select></div>
+      </div>
+      <div class="actions-row">
+        <button type="submit" class="primary" id="f-submit">Start pod</button>
+        <span id="f-status" style="font-size: 12px; opacity:.8;"></span>
+      </div>
+      <pre class="out" id="f-out"></pre>
+    </form>
+  </div>
+
+  <script>
+    const fmtBytes = (raw) => {
+      const n = Number(raw);
+      if (!isFinite(n) || raw === undefined || raw === null) return String(raw ?? '-');
+      const u = ['B','kB','MB','GB','TB']; let i = 0; let v = n;
+      while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+      return i === 0 ? `${Math.round(v)}${u[i]}` : `${v.toFixed(v >= 100 ? 1 : 2)}${u[i]}`;
+    };
+    const parsePct = (raw) => {
+      if (raw == null || raw === '-' || raw === '') return null;
+      const n = parseFloat(String(raw).replace('%', ''));
+      return isFinite(n) ? n : null;
+    };
+    const fmtPct = (raw) => {
+      const n = parsePct(raw);
+      return n == null ? '-' : `${n.toFixed(2)}%`;
+    };
+    const heatColor = (pct) => {
+      const p = Math.max(0, Math.min(pct, 100));
+      let r, g, b;
+      if (p <= 25) { const t = p / 25; r = 34 + (234 - 34) * t; g = 197 + (179 - 197) * t; b = 94 + (8 - 94) * t; }
+      else { const t = (p - 25) / 75; r = 234 + (220 - 234) * t; g = 179 + (38 - 179) * t; b = 8 + (38 - 8) * t; }
+      return `rgba(${r|0},${g|0},${b|0},0.22)`;
+    };
+    const heatCell = (pct, label) => {
+      if (pct == null) return `<span>${label}</span>`;
+      return `<div class="heat-wrap"><div class="heat-fill" style="width:${Math.max(0,Math.min(pct,100)).toFixed(2)}%; background:${heatColor(pct)};"></div><span class="heat-text">${label}</span></div>`;
+    };
+    const memUsage = (c) => {
+      if (c.MemUsageBytes != null) return `${fmtBytes(c.MemUsageBytes)} / ${fmtBytes(c.MemLimit)}`;
+      const raw = c.MemUsage;
+      if (!raw) return '-';
+      return String(raw);
+    };
+    const ioPair = (c, ins, outs, fallback) => {
+      const i = ins.find(k => c[k] != null);
+      const o = outs.find(k => c[k] != null);
+      if (i || o) return `${i ? fmtBytes(c[i]) : '-'} / ${o ? fmtBytes(c[o]) : '-'}`;
+      return c[fallback] || '-';
+    };
+
+    async function fetchInfo() {
+      try {
+        const res = await fetch('/api/info');
+        const data = await res.json();
+        const ips = (data.ips || []).map(ip => `<code>${ip}</code>`).join(' ');
+        document.getElementById('meta').innerHTML =
+          `host: <code>${data.hostname}</code> &middot; ${ips} &middot; ${new Date(data.time).toLocaleTimeString()}`;
+      } catch (_) {}
+    }
+
+    async function fetchStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        renderTable(data);
+      } catch (err) {
+        console.error('stats fetch failed:', err);
+      }
+    }
+
+    function renderTable(containers) {
+      const tbody = document.getElementById('stats-body');
+      if (!containers || containers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="9">No containers running</td></tr>';
+        return;
+      }
+      const html = containers.map(c => {
+        const name = c.Name || '-';
+        const dash = name.indexOf('-');
+        const agent = dash > 0 ? name.slice(0, dash) : '';
+        const instance = dash > 0 ? name.slice(dash + 1) : '';
+        const cpu = parsePct(c.CPU || c.CPUPerc);
+        const mem = parsePct(c.MemPerc);
+        const id = (c.ID || c.ContainerID || '').slice(0, 12);
+        const actions = (agent && instance) ? `
+          <div class="inline">
+            <button onclick="sendAction('restart','${agent}','${instance}')">restart</button>
+            <button onclick="sendAction('stop','${agent}','${instance}')">stop</button>
+            <button onclick="sendAction('start','${agent}','${instance}')">start</button>
+            <button class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
+          </div>` : '';
+        return `<tr>
+          <td><code>${id}</code></td>
+          <td><b>${name}</b></td>
+          <td>${heatCell(cpu, fmtPct(c.CPU || c.CPUPerc))}</td>
+          <td>${memUsage(c)}</td>
+          <td>${heatCell(mem, fmtPct(c.MemPerc))}</td>
+          <td>${ioPair(c, ['NetInput','NetworkInput'], ['NetOutput','NetworkOutput'], 'NetIO')}</td>
+          <td>${ioPair(c, ['BlockInput'], ['BlockOutput'], 'BlockIO')}</td>
+          <td>${c.PIDS || c.Pids || c.PIDs || '-'}</td>
+          <td>${actions}</td>
+        </tr>`;
+      }).join('');
+      tbody.innerHTML = html;
+    }
+
+    function confirmDelete(agent, instance) {
+      if (confirm(`Delete ${agent}-${instance}? This wipes its workspace.`)) sendAction('delete', agent, instance);
+    }
+
+    async function sendAction(op, agent, instance) {
+      const formData = new URLSearchParams();
+      formData.append('op', op);
+      formData.append('agent', agent);
+      formData.append('instance', instance);
+      try {
+        const res = await fetch('/api/action', { method: 'POST', body: formData });
+        const text = await res.text();
+        showToast(res.ok ? `${op} ${agent} ${instance}` : text, !res.ok);
+        fetchStats();
+      } catch (err) {
+        showToast('Network error: ' + err, true);
+      }
+    }
+
+    function showToast(msg, isError = false) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast ' + (isError ? 'err' : 'ok');
+      t.style.display = 'block';
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(() => t.style.display = 'none', 4000);
+    }
+
+    function fillSelect(id, values, selected) {
+      const el = document.getElementById(id);
+      el.innerHTML = '';
+      for (const v of values) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v;
+        if (v === selected) opt.selected = true;
+        el.appendChild(opt);
+      }
+    }
+
+    async function loadAgentOptions() {
+      try {
+        const res = await fetch('/api/agents');
+        const data = await res.json();
+        fillSelect('f-agent', data.agents || []);
+        fillSelect('f-flavor', data.flavors || ['all'], 'all');
+        fillSelect('f-volumes', data.volumes || ['all', 'none'], 'all');
+        fillSelect('f-base', data.bases || ['alpine', 'trixie-slim'], data.defaultBase || 'alpine');
+      } catch (err) {
+        console.error('failed to load agent options:', err);
+      }
+    }
+
+    async function submitCreate(ev) {
+      ev.preventDefault();
+      const form = document.getElementById('create-form');
+      const submit = document.getElementById('f-submit');
+      const statusEl = document.getElementById('f-status');
+      const outEl = document.getElementById('f-out');
+      const fd = new FormData(form);
+      const body = new URLSearchParams();
+      for (const [k, v] of fd.entries()) body.append(k, v);
+
+      submit.disabled = true;
+      statusEl.textContent = 'starting…';
+      outEl.style.display = 'none';
+      outEl.textContent = '';
+
+      try {
+        const res = await fetch('/api/create', { method: 'POST', body });
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch (_) { data = { output: text }; }
+        if (res.ok) {
+          const label = data.instance ? `${data.agent}-${data.instance}` : `${data.agent}-(auto)`;
+          statusEl.textContent = `started ${label}`;
+          showToast(`Started ${label}`);
+          if (data.output) { outEl.textContent = data.output; outEl.style.display = 'block'; }
+          form.elements['instance'].value = '';
+          fetchStats();
+        } else {
+          statusEl.textContent = 'failed';
+          outEl.textContent = data.output || data.error || text;
+          outEl.style.display = 'block';
+          showToast('Create failed — see output below', true);
+        }
+      } catch (err) {
+        statusEl.textContent = 'network error';
+        showToast('Network error: ' + err, true);
+      } finally {
+        submit.disabled = false;
+      }
+      return false;
+    }
+
+    fetchInfo();
+    fetchStats();
+    loadAgentOptions();
+    setInterval(fetchStats, 3000);
+    setInterval(fetchInfo, 30000);
+  </script>
+</body>
+</html>

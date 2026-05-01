@@ -1,0 +1,1315 @@
+# Custom Podman/Quadlet Fleet Manager
+pod() {
+    local config_dir_root="$HOME/.pod_agents_config"
+    local config_dir_agents="$config_dir_root/agents"
+    local config_dir_flavors="$config_dir_root/flavors"
+    local config_dir_skills="$config_dir_root/skills"
+    local config_dir_volumes="$config_dir_root/volumes"
+
+
+    # 1. Setup & Discovery
+    mkdir -p "$config_dir_root" "$config_dir_agents" "$config_dir_flavors" "$config_dir_skills" "$config_dir_volumes"
+
+    # Mask quadlet's auto-injected network-wait dependency on podman < 5.8.
+    # podman 5.0–5.7 quadlet adds Wants=/After=podman-user-wait-network-online.service to every container unit;
+    # if that probe can't reach its target it sits at its default 90s timeout, blocking every pod start.
+    # podman >= 5.8 fixed this, so we skip the mask there.
+    # Marker file makes this a one-time op per host.
+    if [ ! -e "$config_dir_root/.network-wait-checked" ]; then
+        local _podman_ver _podman_major _podman_minor _podman_rest
+        _podman_ver=$(podman --version 2>/dev/null | awk '{print $3}')
+        _podman_major=${_podman_ver%%.*}
+        _podman_rest=${_podman_ver#*.}
+        _podman_minor=${_podman_rest%%.*}
+        if [[ "$_podman_major" =~ ^[0-9]+$ ]] && [[ "$_podman_minor" =~ ^[0-9]+$ ]]; then
+            if [ "$_podman_major" -lt 5 ] || { [ "$_podman_major" -eq 5 ] && [ "$_podman_minor" -lt 8 ]; }; then
+                if systemctl --user list-unit-files podman-user-wait-network-online.service &>/dev/null; then
+                    echo -e "\033[36mPodman $_podman_ver detected — masking podman-user-wait-network-online.service to avoid 90s startup delay (fixed upstream in 5.8).\033[0m"
+                    systemctl --user mask podman-user-wait-network-online.service &>/dev/null || true
+                fi
+            fi
+            touch "$config_dir_root/.network-wait-checked"
+        fi
+    fi
+
+    # Auto-scaffold 'none' if the flavors directory is empty
+    if [ -z "$(ls -A "$config_dir_flavors" 2>/dev/null)" ]; then
+        echo "# Base node image only; no extra flavors added." > "$config_dir_flavors/none.containerfile"
+    fi
+
+    if [ -f "$config_dir_root/defaults.conf" ]; then
+        source "$config_dir_root/defaults.conf"
+    else
+        cat <<EOF > "$config_dir_root/defaults.conf"
+OPENAI_BASE_URL="http://192.168.178.67:8008/v1"
+OPENAI_API_KEY="rms-omlx"
+DEFAULT_MODEL="Qwen3.6-35B-A3B-8bit"
+IMAGE_CACHE_ROOT="\$HOME/.cache/podman-containers"
+# Base image used for all builds. Pick one of: alpine, trixie-slim
+BASE_IMAGE="alpine"
+EOF
+        source "$config_dir_root/defaults.conf"
+    fi
+    # Backfill BASE_IMAGE on configs that pre-date this option.
+    : "${BASE_IMAGE:=alpine}"
+
+    # Resolve a base shorthand or explicit tag to (full_image, short_tag).
+    # Used for both the Containerfile FROM line and image-name tagging.
+    _resolve_base_image() {
+        local raw="${1:-$BASE_IMAGE}"
+        case "$raw" in
+            ""|alpine|node:current-alpine) BASE_IMAGE_FULL="docker.io/library/node:current-alpine"; BASE_IMAGE_TAG="alpine" ;;
+            trixie|trixie-slim|debian|slim|node:current-trixie-slim) BASE_IMAGE_FULL="docker.io/library/node:current-trixie-slim"; BASE_IMAGE_TAG="trixie" ;;
+            *) BASE_IMAGE_FULL="$raw"; BASE_IMAGE_TAG="$(echo "$raw" | tr '/:' '__')" ;;
+        esac
+    }
+
+    # Dynamically scan for agents and flavors
+    local available_agents=()
+    for f in "$config_dir_agents"/*.sh; do
+        [ -f "$f" ] || continue
+        available_agents+=("$(basename "$f" .sh)")
+    done
+    
+    local available_flavors=()
+    for f in "$config_dir_flavors"/*.containerfile; do
+        [ -f "$f" ] || continue
+        available_flavors+=("$(basename "$f" .containerfile)")
+    done
+
+    local available_volumes=()
+    for f in "$config_dir_volumes"/*.volumes; do
+        [ -f "$f" ] || continue
+        available_volumes+=("$(basename "$f" .volumes)")
+    done
+
+    local agent_list_str="${available_agents[@]}"
+    local agent_prompt_str="${agent_list_str// /\/}"
+
+    pick_agent_required() {
+        if [ ${#available_agents[@]} -eq 0 ]; then
+            echo -e "\033[31mNo agent plugins found in $config_dir_agents.\033[0m" >&2
+            return 1
+        fi
+        echo -e "\033[36mSelect an agent:\033[0m" >&2
+        local original_ps3="$PS3"
+        PS3="Agent number: "
+        select selected_agent in "${available_agents[@]}" "Cancel"; do
+            if [ "$selected_agent" = "Cancel" ]; then
+                PS3="$original_ps3"
+                return 1
+            elif [ -n "$selected_agent" ]; then
+                PS3="$original_ps3"
+                printf '%s\n' "$selected_agent"
+                return 0
+            else
+                echo -e "\033[31mInvalid selection.\033[0m" >&2
+            fi
+        done
+    }
+
+    pick_agent_start() {
+        if [ ${#available_agents[@]} -eq 0 ]; then
+            echo -e "\033[31mNo agent plugins found in $config_dir_agents.\033[0m" >&2
+            return 1
+        fi
+        echo -e "\033[36mSelect an agent:\033[0m" >&2
+        local original_ps3="$PS3"
+        PS3="Agent number: "
+        select selected_agent in "${available_agents[@]}" "All" "Cancel"; do
+            if [ "$selected_agent" = "Cancel" ]; then
+                PS3="$original_ps3"
+                return 1
+            elif [ -n "$selected_agent" ]; then
+                PS3="$original_ps3"
+                printf '%s\n' "$selected_agent"
+                return 0
+            else
+                echo -e "\033[31mInvalid selection.\033[0m" >&2
+            fi
+        done
+    }
+
+    pick_agent_or_all() {
+        if [ ${#available_agents[@]} -eq 0 ]; then
+            echo ""
+            return 0
+        fi
+        echo -e "\033[36mSelect an agent to update (or All):\033[0m" >&2
+        local original_ps3="$PS3"
+        PS3="Agent number: "
+        select selected_agent in "All" "${available_agents[@]}" "Cancel"; do
+            if [ "$selected_agent" = "Cancel" ]; then
+                PS3="$original_ps3"
+                return 1
+            elif [ "$selected_agent" = "All" ]; then
+                PS3="$original_ps3"
+                echo ""
+                return 0
+            elif [ -n "$selected_agent" ]; then
+                PS3="$original_ps3"
+                printf '%s\n' "$selected_agent"
+                return 0
+            else
+                echo -e "\033[31mInvalid selection.\033[0m" >&2
+            fi
+        done
+    }
+
+    # Helper: Shared Node + Dynamic Flavors Base Builder
+    write_base_node_containerfile() {
+        local build_dir="$1"
+        local flavor="$2"
+        local base_in="${3:-$BASE_IMAGE}"
+
+        _resolve_base_image "$base_in"
+
+        if [[ "$BASE_IMAGE_FULL" == *alpine* ]]; then
+            cat <<EOF > "$build_dir/Containerfile"
+FROM ${BASE_IMAGE_FULL}
+RUN apk add --no-cache bash tmux curl unzip git ripgrep fd
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+WORKDIR /workspace
+EOF
+        else
+            cat <<EOF > "$build_dir/Containerfile"
+FROM ${BASE_IMAGE_FULL}
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \\
+    apt-get install -y tmux curl unzip git bash locales ripgrep fd-find && \\
+    ln -sf "\$(command -v fdfind)" /usr/local/bin/fd && \\
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \\
+    sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \\
+    dpkg-reconfigure --frontend=noninteractive locales
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+WORKDIR /workspace
+EOF
+        fi
+
+        # Dynamically inject flavor snippets
+        if [ "$flavor" = "all" ] || [ "$flavor" = "combo" ]; then
+            for f in "$config_dir_flavors"/*.containerfile; do
+                [ -f "$f" ] && { cat "$f"; echo ""; } >> "$build_dir/Containerfile"
+            done
+        elif [ -n "$flavor" ] && [ -f "$config_dir_flavors/${flavor}.containerfile" ]; then
+            cat "$config_dir_flavors/${flavor}.containerfile" >> "$build_dir/Containerfile"
+            echo "" >> "$build_dir/Containerfile"
+        fi
+
+        # TrueColor tmux config without "set -g extended-keys-format csi-u"
+        cat <<'EOF' > "$build_dir/tmux.conf"
+set -g default-terminal "tmux-256color"
+set -ag terminal-overrides ",xterm-256color:RGB"
+set -g extended-keys on
+set -g extended-keys-format csi-u
+set -g focus-events on
+EOF
+        echo "COPY tmux.conf /etc/tmux.conf" >> "$build_dir/Containerfile"
+    }
+
+    # 2. Interactive CLI Mode
+    if [ "$#" -eq 0 ]; then
+        local options=("start" "stop" "restart" "update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "batch" "server" "base" "cache-clean" "quit")
+        local selected_action=""
+        
+        while true; do
+            echo -e "\033[1;36m🛥️  Podman/Quadlet Fleet Manager\033[0m"
+            for i in "${!options[@]}"; do
+                printf "\033[36m%2d)\033[0m %-11s " "$((i+1))" "${options[$i]}"
+                if [ $(( (i+1) % 4 )) -eq 0 ]; then echo ""; fi
+            done
+            if [ $(( ${#options[@]} % 4 )) -ne 0 ]; then echo ""; fi
+            
+            read -p "Select an action: " choice
+            if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#options[@]}" ]; then
+                echo -e "\033[31mInvalid option.\033[0m\n"
+                continue
+            fi
+            selected_action="${options[$((choice-1))]}"
+            break
+        done
+
+        case $selected_action in
+            quit) echo "Exiting."; return 0 ;;
+            cache-clean) pod cache-clean; return $? ;;
+            remove-all) pod remove --all; return $? ;;
+            delete-all) pod delete --all; return $? ;;
+            base)
+                read -p "Set default base image (alpine, trixie-slim) [${BASE_IMAGE}]: " prompt_base
+                prompt_base="${prompt_base:-$BASE_IMAGE}"
+                pod base "$prompt_base"
+                return $?
+                ;;
+            server)
+                local server_options=("start" "stop" "restart" "status" "logs")
+                echo -e "\033[36mServer action:\033[0m"
+                local original_ps3="$PS3"
+                PS3="Action: "
+                select sa in "${server_options[@]}" "Cancel"; do
+                    [ "$sa" = "Cancel" ] && { PS3="$original_ps3"; return 0; }
+                    [ -n "$sa" ] && { PS3="$original_ps3"; pod server "$sa"; return $?; }
+                done
+                ;;
+            batch)
+                local batch_options=("run" "tmux" "stats" "list" "stop")
+                echo -e "\033[36mBatch action:\033[0m"
+                local original_ps3="$PS3"
+                PS3="Action: "
+                select ba in "${batch_options[@]}" "Cancel"; do
+                    [ "$ba" = "Cancel" ] && { PS3="$original_ps3"; return 0; }
+                    [ -z "$ba" ] && continue
+                    PS3="$original_ps3"
+                    case "$ba" in
+                        run)
+                            local prompt_agent="" prompt_instance="" prompt_file=""
+                            prompt_agent="$(pick_agent_or_all)" || return 0
+                            [ -n "$prompt_agent" ] && read -p "Instance name (blank for all of agent): " prompt_instance
+                            read -p "Path to prompts file: " prompt_file
+                            read -p "Concurrent? [y/N]: " prompt_conc
+                            local extra=""
+                            [[ "$prompt_conc" =~ ^[yY] ]] && extra="--concurrent"
+                            if [ -n "$prompt_instance" ]; then
+                                pod batch "$prompt_agent" "$prompt_instance" "$prompt_file" $extra
+                            elif [ -n "$prompt_agent" ]; then
+                                pod batch "$prompt_agent" "$prompt_file" $extra
+                            else
+                                pod batch "$prompt_file" $extra
+                            fi
+                            return $?
+                            ;;
+                        tmux|stats|list) pod batch "$ba"; return $? ;;
+                        stop)
+                            read -p "Batch id (blank to list): " bid
+                            [ -z "$bid" ] && { pod batch list; return 0; }
+                            pod batch stop "$bid"
+                            return $?
+                            ;;
+                    esac
+                done
+                ;;
+            tmux)
+                echo -e "\033[36mEnter instance name for grid view (leave blank for the first pod of all agents):\033[0m"
+                read -p "Instance name: " prompt_instance
+                pod tmux "$prompt_instance"
+                return $? 
+                ;;
+            update)
+                echo -e "\033[36m(Leave blank to update ALL agents or ALL instances)\033[0m"
+                local prompt_agent=""
+                prompt_agent="$(pick_agent_or_all)" || { echo "Action canceled."; return 0; }
+                local prompt_instance=""
+                [ -n "$prompt_agent" ] && read -p "Instance name: " prompt_instance
+                pod update "$prompt_agent" "$prompt_instance"
+                return $?
+                ;;
+            prebuild)
+                echo -e "\033[36m(Leave blank to prebuild ALL agents)\033[0m"
+                local prompt_agent=""
+                prompt_agent="$(pick_agent_or_all)" || { echo "Action canceled."; return 0; }
+                local flavor_hints="${available_flavors[*]} all"
+                read -p "Flavor (${flavor_hints// /, }) [all]: " prompt_flavor
+                prompt_flavor="${prompt_flavor:-all}"
+                local vol_hints="${available_volumes[*]} all none"
+                read -p "Volumes (${vol_hints// /, }) [all]: " prompt_volumes
+                prompt_volumes="${prompt_volumes:-all}"
+                read -p "Base image (alpine, trixie-slim) [${BASE_IMAGE}]: " prompt_base
+                prompt_base="${prompt_base:-$BASE_IMAGE}"
+                pod prebuild "$prompt_agent" "" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                return $?
+                ;;
+            start)
+                echo -e "\033[36mCreate or start a pod:\033[0m"
+                local prompt_agent=""
+                prompt_agent="$(pick_agent_start)" || { echo "Action canceled."; return 0; }
+
+                read -p "Instance name (leave blank for auto): " prompt_instance
+
+                local flavor_hints="${available_flavors[*]} all"
+                read -p "Flavor (${flavor_hints// /, }) [all]: " prompt_flavor
+                prompt_flavor="${prompt_flavor:-all}"
+                local vol_hints="${available_volumes[*]} all none"
+                read -p "Volumes (${vol_hints// /, }) [all]: " prompt_volumes
+                prompt_volumes="${prompt_volumes:-all}"
+                read -p "Base image (alpine, trixie-slim) [${BASE_IMAGE}]: " prompt_base
+                prompt_base="${prompt_base:-$BASE_IMAGE}"
+
+                if [ "$prompt_agent" = "All" ]; then
+                    for a in "${available_agents[@]}"; do
+                        echo -e "\033[1;32mStarting ${a}...\033[0m"
+                        pod start "$a" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                    done
+                else
+                    pod start "$prompt_agent" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                fi
+                return $?
+                ;;
+            stop|restart|status|stats|remove|delete|join|enter|it)
+                local available_pods=()
+                [ "$selected_action" = "stats" ] && available_pods+=("All")
+
+                for agent_dir in "$HOME/Developer/"*-pods; do
+                    [ -d "$agent_dir" ] || continue
+                    local current_agent=$(basename "$agent_dir" | sed 's/-pods//')
+                    for inst_dir in "$agent_dir"/*/; do
+                        [ -d "$inst_dir" ] || continue
+                        available_pods+=("${current_agent} $(basename "$inst_dir")")
+                    done
+                done
+
+                if [ ${#available_pods[@]} -eq 0 ] && [ "$selected_action" != "stats" ]; then
+                    echo -e "\033[33mNo existing pods found.\033[0m"; return 0
+                fi
+
+                echo -e "\033[36mSelect target pod for '$selected_action':\033[0m"
+                local original_ps3="$PS3"
+                PS3="Pod number: "
+                select selected_pod in "${available_pods[@]}" "Cancel"; do
+                    if [ "$selected_pod" == "Cancel" ]; then echo "Action canceled."; break
+                    elif [ "$selected_pod" == "All" ]; then pod stats; return $?
+                    elif [ -n "$selected_pod" ]; then
+                        pod "$selected_action" "${selected_pod%% *}" "${selected_pod#* }"
+                        return $?
+                    else echo -e "\033[31mInvalid selection.\033[0m"; fi
+                done
+                PS3="$original_ps3"
+                ;;
+        esac
+        return 0
+    fi
+
+    # 3. Standard Variables & Execution
+    local action=$1
+    local agent="${2:-}"
+    local instance="${3:-}"
+    local flavor="${4:-all}"
+    local volumes="${5:-all}"
+    local base_in="${6:-$BASE_IMAGE}"
+
+    # Backward-compatible alias: treat "standard" as "all".
+    [ "$flavor" = "standard" ] && flavor="all"
+    [ "$volumes" = "standard" ] && volumes="all"
+
+    _resolve_base_image "$base_in"
+    
+    if [ "$action" = "cache-clean" ]; then
+        echo -e "\033[33mRemoving build cache...\033[0m"
+        rm -rf "$IMAGE_CACHE_ROOT"
+        podman images --format "{{.Repository}}:{{.Tag}}" | grep "localhost/.*-agent-.*" | xargs -r podman image rm -f
+        echo -e "\033[32mCache cleanup complete.\033[0m"
+        return 0
+    fi
+
+    if [ "$action" = "base" ]; then
+        local new_base="${2:-}"
+        if [ -z "$new_base" ]; then
+            echo "Current default base image: ${BASE_IMAGE} (resolved: ${BASE_IMAGE_FULL})"
+            echo "Usage: pod base <alpine|trixie-slim|...>"
+            return 0
+        fi
+        _resolve_base_image "$new_base"
+        if [ -f "$config_dir_root/defaults.conf" ]; then
+            if grep -q '^BASE_IMAGE=' "$config_dir_root/defaults.conf"; then
+                sed -i.bak -E "s|^BASE_IMAGE=.*|BASE_IMAGE=\"${new_base}\"|" "$config_dir_root/defaults.conf"
+                rm -f "$config_dir_root/defaults.conf.bak"
+            else
+                printf '\nBASE_IMAGE="%s"\n' "$new_base" >> "$config_dir_root/defaults.conf"
+            fi
+        fi
+        echo -e "\033[32mDefault base image set to '${new_base}' (${BASE_IMAGE_FULL}).\033[0m"
+        return 0
+    fi
+
+    if [ "$action" = "server" ]; then
+        local sub="${2:-status}"
+        local server_dir="$config_dir_root/server"
+        local server_port="${POD_SERVER_PORT:-1337}"
+        local server_bin="$server_dir/server"
+        local server_pid_file="$server_dir/server.pid"
+        local server_log_file="$server_dir/server.log"
+        local builder_image="docker.io/library/golang:1.23-alpine"
+
+        # Returns one IPv4 per line. IPv6 is intentionally skipped here — most LAN
+        # consumers want a v4 address, and v6 link-local addresses (fe80::) aren't
+        # reachable from peers anyway.
+        _pod_server_ips() {
+            local ips=()
+            if command -v ip &>/dev/null; then
+                while IFS= read -r ip; do
+                    [ -n "$ip" ] && ips+=("$ip")
+                done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
+            fi
+            if [ ${#ips[@]} -eq 0 ] && command -v hostname &>/dev/null; then
+                local h_ips
+                h_ips=$(hostname -I 2>/dev/null) || h_ips=""
+                for ip in $h_ips; do
+                    case "$ip" in *:*) ;; *) ips+=("$ip") ;; esac  # skip v6
+                done
+            fi
+            if [ ${#ips[@]} -eq 0 ] && command -v ifconfig &>/dev/null; then
+                while IFS= read -r ip; do
+                    [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ] && ips+=("$ip")
+                done < <(ifconfig 2>/dev/null | awk '/inet /{print $2}')
+            fi
+            printf '%s\n' "${ips[@]}"
+        }
+
+        _pod_server_pid_alive() {
+            [ -f "$server_pid_file" ] || return 1
+            local p; p=$(cat "$server_pid_file" 2>/dev/null)
+            [ -n "$p" ] && kill -0 "$p" 2>/dev/null
+        }
+
+        # Find any process running our server binary, regardless of pid-file state.
+        # Returns one PID per line on stdout.
+        _pod_server_orphan_pids() {
+            # pgrep -f matches the full command line; -x would require exact match which we don't want.
+            pgrep -f "^${server_bin}( |$)" 2>/dev/null
+        }
+
+        _pod_server_port_holder() {
+            # Returns the PID currently bound to $server_port, if any.
+            if command -v ss >/dev/null 2>&1; then
+                ss -ltnp "sport = :${server_port}" 2>/dev/null \
+                    | awk -F 'pid=' 'NF>1 {print $2}' \
+                    | awk -F ',' '{print $1}' \
+                    | head -n 1
+            elif command -v lsof >/dev/null 2>&1; then
+                lsof -nP -iTCP:"${server_port}" -sTCP:LISTEN 2>/dev/null \
+                    | awk 'NR>1 {print $2; exit}'
+            fi
+        }
+
+        _pod_server_kill_pid() {
+            local p="$1"
+            [ -z "$p" ] && return 0
+            kill "$p" 2>/dev/null || true
+            for _ in 1 2 3 4 5 6 7 8; do
+                kill -0 "$p" 2>/dev/null || return 0
+                sleep 0.2
+            done
+            kill -9 "$p" 2>/dev/null || true
+        }
+
+        _pod_server_build() {
+            local force="${1:-0}"
+            if [ "$force" != "1" ] && [ -x "$server_bin" ] && [ "$server_bin" -nt "$server_dir/main.go" ]; then
+                return 0
+            fi
+            echo -e "\033[36mBuilding dashboard binary via $builder_image (host has no Go toolchain assumed)...\033[0m"
+            # Build with a throwaway builder container; output the static binary to the host fs.
+            # `podman unshare chown` is unnecessary because we mount the dir as the user namespace already maps it.
+            if command -v go >/dev/null 2>&1; then
+                ( cd "$server_dir" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o server main.go ) || return 1
+            else
+                podman run --rm \
+                    -v "$server_dir":/src:Z \
+                    -w /src \
+                    -e CGO_ENABLED=0 \
+                    "$builder_image" \
+                    sh -c 'go build -trimpath -ldflags="-s -w" -o server main.go' || return 1
+            fi
+            chmod +x "$server_bin"
+        }
+
+        case "$sub" in
+            start)
+                [ -d "$server_dir" ] || { echo -e "\033[31mServer directory not found at $server_dir.\033[0m"; return 1; }
+                [ -f "$server_dir/main.go" ] || { echo -e "\033[31mmain.go not found in $server_dir.\033[0m"; return 1; }
+
+                if _pod_server_pid_alive; then
+                    echo -e "\033[33mDashboard already running (pid $(cat "$server_pid_file")). Use 'pod server restart'.\033[0m"
+                    return 0
+                fi
+
+                # Migration: clean up the legacy container-in-container dashboard if it's still there.
+                if podman container exists pod-dashboard 2>/dev/null; then
+                    echo -e "\033[33mRemoving legacy 'pod-dashboard' container (the dashboard now runs natively on the host)...\033[0m"
+                    podman rm -f pod-dashboard >/dev/null 2>&1 || true
+                    podman image rm -f localhost/pod-dashboard:latest >/dev/null 2>&1 || true
+                fi
+
+                # Reap orphans from earlier launches (older versions used setsid which didn't
+                # preserve $! correctly, so the pid file pointed at a dead pid while the real
+                # server process kept holding the port).
+                local orphan
+                while IFS= read -r orphan; do
+                    [ -z "$orphan" ] && continue
+                    echo -e "\033[33mKilling orphan dashboard process $orphan...\033[0m"
+                    _pod_server_kill_pid "$orphan"
+                done < <(_pod_server_orphan_pids)
+
+                # If the port is still held by something else, refuse to start with a clear pointer.
+                local holder; holder=$(_pod_server_port_holder)
+                if [ -n "$holder" ]; then
+                    echo -e "\033[31mPort $server_port is held by pid $holder. Resolve manually (e.g. \`kill $holder\`) and retry.\033[0m"
+                    return 1
+                fi
+
+                _pod_server_build || return 1
+
+                # Visual separator in the log so each run is easy to spot when tailing.
+                printf '\n=== %s — pod server start ===\n' "$(date -Iseconds 2>/dev/null || date)" >> "$server_log_file"
+
+                # Run natively on the host so it uses host podman directly. No nesting, no socket mount.
+                # `nohup` execs the binary in-place (preserving $!) and ignores SIGHUP; `disown` removes
+                # it from the shell's job table so the parent shell exiting won't tear it down.
+                # Monitor mode is disabled around the launch so bash doesn't print "[1] <pid>".
+                local _prev_monitor=0
+                case "$-" in *m*) _prev_monitor=1 ;; esac
+                set +m
+                cd "$server_dir" || { [ "$_prev_monitor" = "1" ] && set -m; return 1; }
+                POD_SERVER_PORT="$server_port" nohup "$server_bin" >>"$server_log_file" 2>&1 </dev/null &
+                local server_pid=$!
+                disown 2>/dev/null || true
+                cd - >/dev/null 2>&1 || true
+                [ "$_prev_monitor" = "1" ] && set -m
+                echo "$server_pid" > "$server_pid_file"
+
+                # Brief wait so the log line / port-bind error surfaces if it dies on launch.
+                sleep 0.4
+                if ! _pod_server_pid_alive; then
+                    echo -e "\033[31mDashboard failed to start. Last log lines:\033[0m"
+                    tail -n 20 "$server_log_file" 2>/dev/null
+                    rm -f "$server_pid_file"
+                    return 1
+                fi
+
+                echo -e "\033[1;32mDashboard running (pid $(cat "$server_pid_file")):\033[0m"
+                local printed=0
+                while IFS= read -r ip; do
+                    [ -z "$ip" ] && continue
+                    printf "  \033[36mhttp://%s:%s\033[0m\n" "$ip" "$server_port"
+                    printed=1
+                done < <(_pod_server_ips)
+                [ "$printed" -eq 0 ] && printf "  \033[36mhttp://localhost:%s\033[0m  (no LAN IPs detected)\n" "$server_port"
+                echo -e "  logs: \033[36mpod server logs\033[0m"
+                return 0
+                ;;
+            stop)
+                local killed_any=0
+                if _pod_server_pid_alive; then
+                    _pod_server_kill_pid "$(cat "$server_pid_file")"
+                    killed_any=1
+                fi
+                rm -f "$server_pid_file"
+
+                # Always sweep for orphan processes too (handles pid-file drift from previous versions).
+                local orphan
+                while IFS= read -r orphan; do
+                    [ -z "$orphan" ] && continue
+                    _pod_server_kill_pid "$orphan"
+                    killed_any=1
+                done < <(_pod_server_orphan_pids)
+
+                # Last-resort: anything else holding our port (e.g. a manually-started binary).
+                local holder; holder=$(_pod_server_port_holder)
+                if [ -n "$holder" ]; then
+                    echo -e "\033[33mPort $server_port still held by pid $holder; killing.\033[0m"
+                    _pod_server_kill_pid "$holder"
+                    killed_any=1
+                fi
+
+                if [ "$killed_any" = "1" ]; then
+                    echo -e "\033[32mDashboard stopped.\033[0m"
+                else
+                    echo -e "\033[33mDashboard not running.\033[0m"
+                fi
+                return 0
+                ;;
+            restart)
+                pod server stop
+                pod server start
+                return $?
+                ;;
+            status)
+                if _pod_server_pid_alive; then
+                    echo -e "\033[32mRunning (pid $(cat "$server_pid_file"))\033[0m"
+                    while IFS= read -r ip; do
+                        [ -n "$ip" ] && printf "  http://%s:%s\n" "$ip" "$server_port"
+                    done < <(_pod_server_ips)
+                else
+                    echo -e "\033[33mNot running\033[0m"
+                fi
+                return 0
+                ;;
+            logs)
+                [ -f "$server_log_file" ] || { echo -e "\033[33mNo log file yet.\033[0m"; return 0; }
+                tail -F "$server_log_file"
+                return $?
+                ;;
+            build)
+                _pod_server_build 1
+                return $?
+                ;;
+            *)
+                echo "Usage: pod server {start|stop|restart|status|logs|build}"
+                return 1
+                ;;
+        esac
+    fi
+
+    if [ "$action" = "batch" ]; then
+        local batch_root="$config_dir_root/batch"
+        mkdir -p "$batch_root"
+
+        _pod_batch_progress_line() {
+            local prog_file="$1"
+            [ -f "$prog_file" ] || return 1
+            local raw cur total pct
+            raw=$(cat "$prog_file" 2>/dev/null)
+            cur="${raw%%/*}"
+            total="${raw##*/}"
+            [[ "$cur" =~ ^[0-9]+$ ]] || cur=0
+            [[ "$total" =~ ^[0-9]+$ ]] || total=0
+            pct=0
+            [ "$total" -gt 0 ] && pct=$(( cur * 100 / total ))
+            local tgt bid pod_a pod_i
+            tgt=$(basename "$prog_file" .prog)
+            bid=$(basename "$(dirname "$(dirname "$prog_file")")")
+            pod_a="${tgt%%-*}"
+            pod_i="${tgt#*-}"
+            local status="running"
+            [ -f "$(dirname "$(dirname "$prog_file")")/done.${tgt}" ] && status="done"
+            printf "  \033[36m%-12s %-12s\033[0m [%s/%s] %3d%%  %s  batch=%s\n" \
+                "$pod_a" "$pod_i" "$cur" "$total" "$pct" "$status" "$bid"
+        }
+
+        local sub="${2:-}"
+        case "$sub" in
+            tmux)
+                local panes=()
+                for d in "$batch_root"/*/; do
+                    [ -d "$d" ] || continue
+                    local bid; bid=$(basename "$d")
+                    for prog_file in "$d/progress/"*.prog; do
+                        [ -f "$prog_file" ] || continue
+                        local tgt; tgt=$(basename "$prog_file" .prog)
+                        # Skip finished
+                        [ -f "$d/done.${tgt}" ] && continue
+                        panes+=("$bid|$tgt|$d/logs/${tgt}.log")
+                    done
+                done
+                if [ ${#panes[@]} -eq 0 ]; then
+                    echo -e "\033[33mNo active batch runners.\033[0m"
+                    return 0
+                fi
+                local session="batches"
+                tmux kill-session -t "$session" 2>/dev/null || true
+                local i
+                for (( i=0; i<${#panes[@]}; i++ )); do
+                    local entry="${panes[$i]}"
+                    local bid="${entry%%|*}"
+                    local rest="${entry#*|}"
+                    local tgt="${rest%%|*}"
+                    local logf="${rest#*|}"
+                    local title="${tgt} (${bid})"
+                    if [ "$i" -eq 0 ]; then
+                        tmux new-session -d -s "$session" -n "batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash'"
+                    else
+                        tmux split-window -t "${session}:batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash'"
+                        tmux select-layout -t "${session}:batch" tiled
+                    fi
+                done
+                tmux select-layout -t "${session}:batch" tiled
+                if [ -n "$TMUX" ]; then
+                    tmux switch-client -t "$session"
+                else
+                    tmux attach-session -t "$session"
+                fi
+                return 0
+                ;;
+            stats)
+                local found=0
+                for d in "$batch_root"/*/; do
+                    [ -d "$d" ] || continue
+                    local bid; bid=$(basename "$d")
+                    [ -d "$d/progress" ] || continue
+                    local first=1
+                    for prog_file in "$d/progress/"*.prog; do
+                        [ -f "$prog_file" ] || continue
+                        if [ "$first" -eq 1 ]; then
+                            echo -e "\033[1;36mBatch $bid\033[0m  ($(stat -c %y "$d/meta.conf" 2>/dev/null || stat -f %Sm "$d/meta.conf" 2>/dev/null))"
+                            first=0
+                        fi
+                        _pod_batch_progress_line "$prog_file"
+                        found=1
+                    done
+                done
+                [ "$found" = "0" ] && echo -e "\033[33mNo batches found.\033[0m"
+                return 0
+                ;;
+            list)
+                local any=0
+                for d in "$batch_root"/*/; do
+                    [ -d "$d" ] || continue
+                    any=1
+                    basename "$d"
+                done
+                [ "$any" = "0" ] && echo -e "\033[33mNo batches found.\033[0m"
+                return 0
+                ;;
+            stop)
+                local bid="${3:-}"
+                if [ -z "$bid" ] || [ "$bid" = "all" ]; then
+                    for d in "$batch_root"/*/; do
+                        [ -d "$d" ] || continue
+                        for pidfile in "$d"/runner-*.pid; do
+                            [ -f "$pidfile" ] || continue
+                            local p; p=$(cat "$pidfile" 2>/dev/null)
+                            [ -n "$p" ] && { pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; }
+                        done
+                    done
+                    echo -e "\033[32mAll batch runners signaled.\033[0m"
+                    return 0
+                fi
+                local d="$batch_root/$bid"
+                [ -d "$d" ] || { echo "Batch not found: $bid"; return 1; }
+                for pidfile in "$d"/runner-*.pid; do
+                    [ -f "$pidfile" ] || continue
+                    local p; p=$(cat "$pidfile" 2>/dev/null)
+                    [ -n "$p" ] && { pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; }
+                done
+                echo -e "\033[32mStopped batch $bid.\033[0m"
+                return 0
+                ;;
+        esac
+
+        # ---- Run a new batch ----
+        local concurrent=0
+        local positional=()
+        local arg
+        for arg in "${@:2}"; do
+            case "$arg" in
+                --concurrent) concurrent=1 ;;
+                --*) echo "Unknown flag: $arg"; return 1 ;;
+                *) positional+=("$arg") ;;
+            esac
+        done
+
+        local target_agent="" target_instance="" prompts_file=""
+        case "${#positional[@]}" in
+            1) prompts_file="${positional[0]}" ;;
+            2) target_agent="${positional[0]}"; prompts_file="${positional[1]}" ;;
+            3) target_agent="${positional[0]}"; target_instance="${positional[1]}"; prompts_file="${positional[2]}" ;;
+            *)
+                cat <<USAGE
+Usage:
+  pod batch <prompts.txt>                       # all running pods
+  pod batch <agent> <prompts.txt>               # all running pods of one agent
+  pod batch <agent> <instance> <prompts.txt>    # one specific pod
+  pod batch tmux | stats | list | stop [id]
+  Optional flag: --concurrent  (per-pod parallelism instead of sequential)
+USAGE
+                return 1
+                ;;
+        esac
+
+        [ -f "$prompts_file" ] || { echo -e "\033[31mPrompts file not found: $prompts_file\033[0m"; return 1; }
+        prompts_file="$(cd "$(dirname "$prompts_file")" && pwd)/$(basename "$prompts_file")"
+
+        # Resolve targets among currently running pods
+        local targets=()
+        local running_names
+        running_names=$(podman ps --format '{{.Names}}' 2>/dev/null)
+        local n
+        while IFS= read -r n; do
+            [ -z "$n" ] && continue
+            local pod_a="${n%%-*}"
+            local pod_i="${n#*-}"
+            [ "$pod_a" = "$n" ] && continue   # name had no dash
+            [ -d "$HOME/Developer/${pod_a}-pods/${pod_i}" ] || continue
+            [ -n "$target_agent" ] && [ "$pod_a" != "$target_agent" ] && continue
+            [ -n "$target_instance" ] && [ "$pod_i" != "$target_instance" ] && continue
+            targets+=("${pod_a}-${pod_i}")
+        done <<< "$running_names"
+
+        if [ ${#targets[@]} -eq 0 ]; then
+            echo -e "\033[31mNo matching running pods found.\033[0m"
+            return 1
+        fi
+
+        local total
+        total=$(grep -cve '^[[:space:]]*$' "$prompts_file")
+        [ "$total" -eq 0 ] && { echo -e "\033[31mPrompts file is empty.\033[0m"; return 1; }
+
+        local batch_id; batch_id="$(date +%Y%m%d-%H%M%S)-$$"
+        local batch_dir="$batch_root/$batch_id"
+        mkdir -p "$batch_dir/progress" "$batch_dir/logs"
+        cp "$prompts_file" "$batch_dir/prompts.txt"
+        {
+            echo "batch_id=$batch_id"
+            echo "started=$(date -Iseconds 2>/dev/null || date)"
+            echo "concurrent=$concurrent"
+            echo "total=$total"
+            echo "targets=${targets[*]}"
+            echo "source=$prompts_file"
+        } > "$batch_dir/meta.conf"
+
+        local tgt
+        for tgt in "${targets[@]}"; do
+            local pod_a="${tgt%%-*}"
+            local pod_i="${tgt#*-}"
+
+            # Pull AGENT_BATCH_INVOKE from agent.sh in a subshell (so we don't pollute pod()'s scope).
+            local invoke
+            invoke=$(
+                if [ -f "$config_dir_agents/${pod_a}.sh" ]; then
+                    unset AGENT_BATCH_INVOKE
+                    source "$config_dir_agents/${pod_a}.sh" >/dev/null 2>&1
+                    printf '%s\n' "${AGENT_BATCH_INVOKE:-${pod_a} \"\$PROMPT\"}"
+                else
+                    printf '%s\n' "${pod_a} \"\$PROMPT\""
+                fi
+            )
+            printf '%s\n' "$invoke" > "$batch_dir/invoke.${tgt}"
+
+            local runner="$batch_dir/runner-${tgt}.sh"
+            local prog_file="$batch_dir/progress/${tgt}.prog"
+            local log_file="$batch_dir/logs/${tgt}.log"
+            echo "0/$total" > "$prog_file"
+
+            cat > "$runner" <<RUNNER
+#!/bin/bash
+batch_dir=$(printf '%q' "$batch_dir")
+container=$(printf '%q' "$tgt")
+total=$total
+concurrent=$concurrent
+prog_file="\$batch_dir/progress/${tgt}.prog"
+log_file="\$batch_dir/logs/${tgt}.log"
+prompts="\$batch_dir/prompts.txt"
+invoke=\$(cat "\$batch_dir/invoke.${tgt}")
+
+write_progress() {
+    local v="\$1"
+    printf '%s\n' "\$v" > "\$prog_file.tmp" && mv -f "\$prog_file.tmp" "\$prog_file"
+}
+
+write_progress "0/\$total"
+
+i=0
+declare -a pids
+while IFS= read -r line || [ -n "\$line" ]; do
+    case "\$line" in ''|\#*) continue ;; esac
+    i=\$((i+1))
+    out_log="\$batch_dir/logs/${tgt}.\$i.out"
+    if [ "\$concurrent" = "1" ]; then
+        ( podman exec -e PROMPT="\$line" "\$container" bash -lc "\$invoke" >"\$out_log" 2>&1 ) &
+        pids+=(\$!)
+    else
+        printf '\n=== [%d/%d] %s ===\n' "\$i" "\$total" "\$line" >> "\$log_file"
+        podman exec -e PROMPT="\$line" "\$container" bash -lc "\$invoke" >>"\$log_file" 2>&1
+        write_progress "\$i/\$total"
+    fi
+done < "\$prompts"
+
+if [ "\$concurrent" = "1" ]; then
+    completed=0
+    for p in "\${pids[@]}"; do
+        wait "\$p" 2>/dev/null || true
+        completed=\$((completed+1))
+        write_progress "\$completed/\$total"
+    done
+fi
+
+date -Iseconds > "\$batch_dir/done.${tgt}" 2>/dev/null || date > "\$batch_dir/done.${tgt}"
+RUNNER
+            chmod +x "$runner"
+            nohup "$runner" >"$batch_dir/logs/${tgt}.runner.log" 2>&1 < /dev/null &
+            local rpid=$!
+            echo "$rpid" > "$batch_dir/runner-${tgt}.pid"
+            disown 2>/dev/null || true
+        done
+
+        echo -e "\033[1;32mBatch $batch_id started across ${#targets[@]} pod(s):\033[0m"
+        for tgt in "${targets[@]}"; do
+            local pod_a="${tgt%%-*}"
+            local pod_i="${tgt#*-}"
+            printf "  \033[36m%-12s %-12s\033[0m  log: %s\n" "$pod_a" "$pod_i" "$batch_dir/logs/${tgt}.log"
+        done
+        echo
+        echo -e "  Watch:    \033[36mpod batch tmux\033[0m"
+        echo -e "  Progress: \033[36mpod batch stats\033[0m"
+        echo -e "  Stop:     \033[36mpod batch stop $batch_id\033[0m"
+        return 0
+    fi
+
+    remove_all_managed_pods() {
+        local wipe_workspace_data="$1" # true for delete, false for remove
+        local action_label="remove"
+        [ "$wipe_workspace_data" = "true" ] && action_label="delete"
+
+        echo -e "\033[1;33mRunning '$action_label --all' across all managed pods...\033[0m"
+        local found_any="false"
+
+        for agent_dir in "$HOME/Developer/"*-pods; do
+            [ -d "$agent_dir" ] || continue
+            local current_agent
+            current_agent="$(basename "$agent_dir" | sed 's/-pods$//')"
+
+            for inst_dir in "$agent_dir"/*/; do
+                [ -d "$inst_dir" ] || continue
+                found_any="true"
+                local current_instance
+                current_instance="$(basename "$inst_dir")"
+                local current_service="${current_agent}@${current_instance}.service"
+
+                echo -e "\033[36mDisabling $current_service...\033[0m"
+                systemctl --user disable --now "$current_service" 2>/dev/null || true
+
+                if [ "$wipe_workspace_data" = "true" ]; then
+                    echo -e "\033[31mDeleting workspace: $inst_dir\033[0m"
+                    rm -rf "$inst_dir"
+                fi
+            done
+        done
+
+        [ "$found_any" = "false" ] && echo -e "\033[33mNo managed pods found under $HOME/Developer.\033[0m"
+        echo -e "\033[32mCompleted '$action_label --all'.\033[0m"
+        return 0
+    }
+
+    if { [ "$action" = "remove" ] || [ "$action" = "delete" ]; } && [ "$agent" = "--all" ]; then
+        [ "$action" = "delete" ] && remove_all_managed_pods "true" || remove_all_managed_pods "false"
+        return $?
+    fi
+
+    if { [ "$action" = "join" ] || [ "$action" = "enter" ] || [ "$action" = "it" ]; } && [ -z "$instance" ]; then
+        local found_agent=""
+        local found_instance=""
+        for agent_dir in "$HOME/Developer/"${agent:-*}-pods; do
+            [ -d "$agent_dir" ] || continue
+            local curr_agent
+            curr_agent=$(basename "$agent_dir" | sed 's/-pods$//')
+            for inst_dir in "$agent_dir"/*/; do
+                [ -d "$inst_dir" ] || continue
+                found_agent="$curr_agent"
+                found_instance=$(basename "$inst_dir")
+                break 2
+            done
+        done
+        
+        if [ -n "$found_agent" ] && [ -n "$found_instance" ]; then
+            agent="$found_agent"
+            instance="$found_instance"
+            echo -e "\033[36mAuto-selected pod: ${agent}-${instance}\033[0m"
+        else
+            echo -e "\033[31mNo existing pods found to $action.\033[0m"
+            return 1
+        fi
+    fi
+
+    if [ "$action" = "start" ] && [ -z "$instance" ] && [ -n "$agent" ]; then
+        local names=("dev" "alpha" "beta" "gamma" "delta" "epsilon" "zeta" "eta" "theta" "iota" "kappa" "lambda" "mu" "nu" "xi" "omicron" "pi" "rho" "sigma" "tau" "upsilon" "phi" "chi" "psi" "omega")
+        for n in "${names[@]}"; do
+            if [ ! -d "$HOME/Developer/${agent}-pods/$n" ]; then
+                instance="$n"
+                break
+            fi
+        done
+        if [ -z "$instance" ]; then
+             echo -e "\033[31mError: All auto-names (dev + greek letters) are taken.\033[0m"
+             return 1
+        fi
+        echo -e "\033[36mAuto-selected instance name: ${instance}\033[0m"
+    fi
+
+    if [ -n "$agent" ] && [ "$action" != "tmux" ]; then
+        if [ ! -f "$config_dir_agents/${agent}.sh" ]; then
+            echo -e "\033[31mError: Agent config '${agent}.sh' not found in $config_dir_agents.\033[0m"
+            return 1
+        fi
+        unset -f agent_build_containerfile agent_generate_config agent_pre_update 2>/dev/null || true
+        unset AGENT_SKILLS_SUBPATH 2>/dev/null || true
+        source "$config_dir_agents/${agent}.sh"
+    fi
+
+    local service_name="${agent}@${instance}.service"
+    local container_name="${agent}-${instance}"
+    local quadlet_file="$HOME/.config/containers/systemd/${agent}@.container"
+    local workspace_root="$HOME/Developer/${agent}-pods"
+    local config_dir="$workspace_root/${instance}/config"
+    local image_name="localhost/${agent}-agent-${flavor}-${BASE_IMAGE_TAG}:latest"
+
+    ensure_quadlet_template() {
+        if [ -z "$agent" ]; then
+            echo -e "\033[31mensure_quadlet_template: refusing to write template with empty agent name.\033[0m" >&2
+            return 1
+        fi
+
+        # --- THE BULLETPROOF VOLUME PARSER ---
+        # Hardcoding the path here guarantees it works even if outer variables fail.
+        local safe_vol_dir="$HOME/.pod_agents_config/volumes"
+        # Force fallback to "all" if $volume_pack is somehow empty or unset
+        local safe_vpack="${volume_pack:-all}" 
+
+        local dynamic_volumes=""
+        if [ "$safe_vpack" != "none" ] && [ -d "$safe_vol_dir" ]; then
+            local raw_lines=""
+            if [ "$safe_vpack" = "all" ]; then
+                # cat all files, use grep to strip comments and empty lines
+                raw_lines=$(cat "$safe_vol_dir"/*.volumes 2>/dev/null | grep -E -v '^[[:space:]]*(#|$)')
+            elif [ -f "$safe_vol_dir/${safe_vpack}.volumes" ]; then
+                raw_lines=$(cat "$safe_vol_dir/${safe_vpack}.volumes" 2>/dev/null | grep -E -v '^[[:space:]]*(#|$)')
+            fi
+
+            # Safely append each line using a here-string (which natively fixes missing newlines!)
+            if [ -n "$raw_lines" ]; then
+                while IFS= read -r line; do
+                    [ -n "$line" ] && dynamic_volumes+="Volume=${line}"$'\n'
+                done <<< "$raw_lines"
+            fi
+        fi
+        # -------------------------------------
+        
+        mkdir -p "$(dirname "$quadlet_file")"
+        cat <<EOF > "$quadlet_file"
+[Unit]
+Description=${agent^} Agent Sandbox (%i)
+
+[Container]
+Image=${image_name}
+Pull=never
+ContainerName=${agent}-%i
+Volume=%h/Developer/${agent}-pods/%i/workspace:/workspace:Z
+Volume=%h/Developer/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z
+Volume=%h/.pod_agents_config/skills:/srv/skills:ro,z
+${dynamic_volumes}WorkingDir=/workspace
+Environment=OPENAI_BASE_URL=${OPENAI_BASE_URL}
+Environment=OPENAI_API_BASE=${OPENAI_BASE_URL}
+Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
+Environment=ANTHROPIC_BASE_URL=${OPENAI_BASE_URL%/v1}
+Environment=ANTHROPIC_API_KEY=${OPENAI_API_KEY}
+Environment=ANTHROPIC_MODEL=${DEFAULT_MODEL}
+Environment=LLM=${DEFAULT_MODEL}
+NoNewPrivileges=true
+Exec=sleep infinity
+
+[Service]
+TimeoutStartSec=15
+ExecStartPre=/usr/bin/mkdir -p %h/Developer/${agent}-pods/%i/workspace %h/Developer/${agent}-pods/%i/config
+
+[Install]
+WantedBy=default.target
+EOF
+    }
+
+    # 4. Action Execution Logic
+    case "$action" in
+        stats)
+            if [ -n "$agent" ] && [ -n "$instance" ]; then
+                echo -e "\033[36mStreaming stats for $container_name (Ctrl+C to exit)\033[0m"; podman stats "$container_name"
+            else
+                echo -e "\033[36mStreaming stats for all running pods (Ctrl+C to exit)\033[0m"; podman stats
+            fi
+            ;;
+
+        tmux)
+            local target_instance="$agent" # Shifted variable: 'pod tmux alpha' means $2 is the instance
+            local target_pods=()
+            
+            # 1. Discovery Logic
+            if [ -n "$target_instance" ]; then
+                # User specified an exact instance name (e.g. 'alpha')
+                for a in "${available_agents[@]}"; do
+                    local p_name="${a}-${target_instance}"
+                    # Only map if container actually exists and is running
+                    if [ "$(podman inspect -f '{{.State.Running}}' "$p_name" 2>/dev/null)" == "true" ]; then
+                        target_pods+=("$a:$target_instance")
+                    fi
+                done
+            else
+                # Default: Use all agents, but take only the FIRST running pod of each
+                for a in "${available_agents[@]}"; do
+                    local first_running=$(podman ps --format '{{.Names}}' | grep "^${a}-" | head -n 1)
+                    if [ -n "$first_running" ]; then
+                        local inst="${first_running#${a}-}"
+                        target_pods+=("$a:$inst")
+                    fi
+                done
+            fi
+
+            local count=${#target_pods[@]}
+            if [ "$count" -eq 0 ]; then
+                echo -e "\033[31mNo running pods found to attach to.\033[0m"
+                return 1
+            fi
+
+            local session_name="fleet_${target_instance:-grid_all}"
+            
+            # Kill existing session by this name if we are regenerating it
+            tmux kill-session -t "$session_name" 2>/dev/null || true
+
+            echo -e "\033[36mBuilding tmux grid for $count pods...\033[0m"
+
+            for (( i=0; i<count; i++ )); do
+                local curr_agent="${target_pods[$i]%:*}"
+                local curr_inst="${target_pods[$i]#*:}"
+                local c_name="${curr_agent}-${curr_inst}"
+                
+                # Trick to bypass intense nested quotes: auto-generating a self-destructing wrapper in /tmp
+                local wrapper="/tmp/pod_tmux_${c_name}_${RANDOM}.sh"
+                cat <<'EOF' > "$wrapper"
+#!/bin/bash
+podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$1" "$2" bash -lc 'cmd="$POD_AGENT"; eval "$cmd" || true; exec bash'
+rm -f "$0"
+EOF
+                chmod +x "$wrapper"
+
+                if [ "$i" -eq 0 ]; then
+                    tmux new-session -d -s "$session_name" -n "grid" "$wrapper \"$curr_agent\" \"$c_name\""
+                else
+                    tmux split-window -t "${session_name}:grid" "$wrapper \"$curr_agent\" \"$c_name\""
+                    # Rebalance immediately to ensure we don't run out of space for the next split
+                    tmux select-layout -t "${session_name}:grid" tiled
+                fi
+            done
+
+            # 2. Grid Layout Engine
+            if [ "$count" -le 3 ]; then
+                # Lines them up side-by-side (1, 1-1, or 1-1-1)
+                tmux select-layout -t "${session_name}:grid" even-horizontal
+            else
+                # Natively applies the perfect dynamic n-grid ratio based on terminal geometry (2x2, 3x2, 3x3, etc.)
+                tmux select-layout -t "${session_name}:grid" tiled
+            fi
+
+            # 3. Connection
+            if [ -n "$TMUX" ]; then
+                tmux switch-client -t "$session_name"
+            else
+                tmux attach-session -t "$session_name"
+            fi
+            ;;
+
+        update)
+            local target_agents=("${available_agents[@]}")
+            [ -n "$agent" ] && target_agents=("$agent")
+
+            for a in "${target_agents[@]}"; do
+                echo -e "\033[1;34m=== Updating Target: $a ===\033[0m"
+                unset -f agent_build_containerfile agent_generate_config agent_pre_update 2>/dev/null || true
+                unset AGENT_SKILLS_SUBPATH 2>/dev/null || true
+                source "$config_dir_agents/${a}.sh"
+
+                if declare -f agent_pre_update > /dev/null; then
+                    echo -e "\033[36mRunning pre-update hooks for $a...\033[0m"
+                    agent_pre_update
+                fi
+                
+                local target_instances=()
+                if [ -n "$instance" ] && [ "$agent" = "$a" ]; then
+                    target_instances=("$instance")
+                else
+                    if [ -d "$HOME/Developer/${a}-pods" ]; then
+                        for d in "$HOME/Developer/${a}-pods"/*/; do
+                            [ -d "$d" ] || continue
+                            target_instances+=("$(basename "$d")")
+                        done
+                    fi
+                fi
+
+                [ ${#target_instances[@]} -eq 0 ] && continue
+
+                for inst in "${target_instances[@]}"; do
+                    local current_image
+                    current_image=$(podman inspect --format='{{.Config.Image}}' "${a}-${inst}" 2>/dev/null || echo "")
+                    local detected_flavor="all"
+                    local detected_base="$BASE_IMAGE_TAG"
+                    # Image name pattern: localhost/<agent>-agent-<flavor>-<base>:latest
+                    if [[ "$current_image" =~ -agent-([^-]+)-([^:]+):[^:]+$ ]]; then
+                        detected_flavor="${BASH_REMATCH[1]}"
+                        detected_base="${BASH_REMATCH[2]}"
+                    fi
+
+                    echo -e "\033[33mRemoving old image cache for ${a}-${detected_flavor}-${detected_base} to force rebuild...\033[0m"
+                    podman image rm -f "localhost/${a}-agent-${detected_flavor}-${detected_base}:latest" 2>/dev/null || true
+                    rm -rf "${IMAGE_CACHE_ROOT}/${a}-${detected_flavor}-${detected_base}" 2>/dev/null || true
+
+                    echo -e "\033[32mApplying update and restarting instance: ${a}-${inst}...\033[0m"
+                    pod restart "$a" "$inst" "$detected_flavor" "all" "$detected_base"
+                done
+            done
+            echo -e "\033[1;32m🎉 Fleet update complete.\033[0m"
+            ;;
+            
+        prebuild)
+            local target_agents=("${available_agents[@]}")
+            [ -n "$agent" ] && target_agents=("$agent")
+            for a in "${target_agents[@]}"; do
+                unset -f agent_build_containerfile agent_generate_config agent_pre_update 2>/dev/null || true
+                unset AGENT_SKILLS_SUBPATH 2>/dev/null || true
+                source "$config_dir_agents/${a}.sh"
+                local pre_image="localhost/${a}-agent-${flavor}-${BASE_IMAGE_TAG}:latest"
+                if podman image exists "$pre_image"; then
+                    echo -e "\033[33m✓ ${a} (${flavor}/${BASE_IMAGE_TAG}) already built — skipping. Use 'update' to rebuild.\033[0m"
+                    continue
+                fi
+                local pre_build_dir="${IMAGE_CACHE_ROOT}/${a}-${flavor}-${BASE_IMAGE_TAG}"
+                echo -e "\033[36mPrebuilding ${a} (${flavor}/${BASE_IMAGE_TAG})...\033[0m"
+                mkdir -p "$pre_build_dir"
+                agent_build_containerfile "$pre_build_dir" "$flavor" "$BASE_IMAGE_FULL"
+                podman build --layers -t "$pre_image" -f "$pre_build_dir/Containerfile" "$pre_build_dir" || continue
+                echo -e "\033[32m✓ Prebuilt $pre_image\033[0m"
+            done
+            echo -e "\033[1;32m🎉 Prebuild complete. Subsequent 'pod start' is now near-instant.\033[0m"
+            ;;
+
+        start|restart)
+            local build_dir="${IMAGE_CACHE_ROOT}/${agent}-${flavor}-${BASE_IMAGE_TAG}"
+            if ! podman image exists "$image_name"; then
+                echo -e "\033[36mLocal image not found. Building ${agent} (${flavor}/${BASE_IMAGE_TAG})...\033[0m"
+                mkdir -p "$build_dir"
+                agent_build_containerfile "$build_dir" "$flavor" "$BASE_IMAGE_FULL"
+                podman build --layers -t "$image_name" -f "$build_dir/Containerfile" "$build_dir"
+            fi
+
+            # Render quadlet to a tmp file first; only daemon-reload if the file actually changed.
+            # daemon-reload re-runs every user generator (incl. quadlet), which is the dominant cost in pod start.
+            local quadlet_tmp="${quadlet_file}.new"
+            local prev_quadlet_file="$quadlet_file"
+            quadlet_file="$quadlet_tmp"
+            ensure_quadlet_template || { quadlet_file="$prev_quadlet_file"; return 1; }
+            quadlet_file="$prev_quadlet_file"
+            local need_reload=0
+            if ! cmp -s "$quadlet_tmp" "$quadlet_file" 2>/dev/null; then
+                mv "$quadlet_tmp" "$quadlet_file"
+                need_reload=1
+            else
+                rm -f "$quadlet_tmp"
+            fi
+
+            # Files are written as the host user (UID 1001 in rootless podman maps to container UID 0 = root inside pod), so
+            # plain mkdir/rm/cp/ln are sufficient. `podman unshare` would only be needed to overwrite files that the
+            # container itself wrote with non-root in-namespace UIDs — not the case for our config files.
+            mkdir -p "$config_dir/agent" 2>/dev/null || true
+            rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+
+            agent_generate_config "$config_dir" "$action"
+
+            local skills_subpath="${AGENT_SKILLS_SUBPATH:-skills}"
+            mkdir -p "$config_dir/$(dirname "$skills_subpath")" 2>/dev/null || true
+            ln -sfn /srv/skills "$config_dir/$skills_subpath" 2>/dev/null || true
+
+            [ "$need_reload" -eq 1 ] && systemctl --user daemon-reload
+            [ "$action" != "update" ] && echo -e "\033[32mExecuting: systemctl --user $action $service_name\033[0m"
+            systemctl --user "$action" "$service_name"
+            ;;
+            
+        stop|status) systemctl --user "$action" "$service_name" ;;
+        remove) systemctl --user disable --now "$service_name"; echo "Service disabled." ;;
+        delete)
+            echo -e "\033[33mStopping and disabling $service_name...\033[0m"
+            systemctl --user disable --now "$service_name" 2>/dev/null || true
+            if [ -n "$instance" ] && [[ "$instance" != *"/"* ]] && [[ "$instance" != *"."* ]]; then
+                echo -e "\033[31mNuking workspace data at $workspace_root/${instance}...\033[0m"
+                rm -rf "$workspace_root/${instance}"
+            fi
+            ;;
+        join|enter)
+            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
+            ;;
+        it) podman exec -it "$container_name" bash ;;
+    esac
+}
+complete -W "start stop restart update prebuild status stats remove delete remove-all delete-all join enter it tmux batch server base cache-clean quit" pod

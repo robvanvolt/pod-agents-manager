@@ -1,0 +1,13 @@
+.env
+.DS_Store
+.claude
+.venv
+
+paper-lookup
+alpha.env
+beta.env
+gamma.env
+
+copy.sh
+
+__pycache__/
