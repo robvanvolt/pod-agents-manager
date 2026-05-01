@@ -48,10 +48,8 @@ src_root=$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1)
 
 mkdir -p "$CONFIG_ROOT"
 cp "$src_root/.pod_agents" "${HOME}/.pod_agents"
-created_env=0
 if [ ! -f "$CONFIG_ROOT/.env" ]; then
     cp "$src_root/.pod_agents_config/.env.example" "$CONFIG_ROOT/.env"
-    created_env=1
 fi
 cp "$src_root/.pod_agents_config/.env.example" "$CONFIG_ROOT/.env.example"
 cp "$src_root/.pod_agents_config/version.conf" "$CONFIG_ROOT/version.conf"
@@ -69,24 +67,11 @@ if ! grep -Fqx "$source_line" "$rc_file"; then
     printf '\n%s\n' "$source_line" >> "$rc_file"
 fi
 
-config_mode="--missing-only"
-[ "$created_env" -eq 1 ] && config_mode="--bootstrap"
-
-if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    echo
-    echo "Checking pod-agents-manager configuration..."
-    # shellcheck disable=SC1090
-    source "${HOME}/.pod_agents"
-    pod config "$config_mode"
-else
-    echo
-    echo "No interactive terminal detected. Run 'pod config' after opening a shell if you need to set POD_* values."
-fi
-
 echo
 echo "Installed pod-agents-manager into ${HOME}."
 echo "Shell init updated: ${rc_file}"
 echo "Next steps:"
 echo "  exec $(basename "${SHELL:-bash}") -l"
-echo "  pod config"
+echo "  pod start <agent> <instance>  # prompts once if POD_* values are unset"
+echo "  pod config                    # optional: adjust saved values later"
 echo "  pod prebuild"

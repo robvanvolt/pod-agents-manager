@@ -73,7 +73,7 @@ The shell function generates a Quadlet `*.container` template per agent, lets `s
 | `tmux` | optional but recommended | needed for `pod tmux` and `pod batch tmux` |
 | `go` | not required on host | the dashboard binary is built in a transient `golang:alpine` builder container if Go is missing |
 
-An OpenAI-compatible inference endpoint is what each agent talks to. The shipped default points at `http://192.168.178.67:8008/v1` (a local LM-Studio / vLLM / TGI box) — change it with `pod config` or in `~/.pod_agents_config/.env`.
+An OpenAI-compatible inference endpoint is what each agent talks to. On first `pod` start, missing `POD_*` values are prompted once and saved to `~/.pod_agents_config/.env`; later changes can be made with `pod config` or by editing that file.
 
 ## Installation
 
@@ -81,10 +81,10 @@ An OpenAI-compatible inference endpoint is what each agent talks to. The shipped
 curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/main/install.sh | bash
 exec bash -l
 
-# point it at your inference server (one-time)
-pod config
+# first start prompts once for missing POD_* values
+pod start pi dev
 
-# (optional) prebuild every agent's image so first `pod start` is instant
+# (optional) prebuild every agent's image
 pod prebuild
 ```
 

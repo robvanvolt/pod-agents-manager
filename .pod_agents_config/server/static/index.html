@@ -194,8 +194,9 @@
         const res = await fetch('/api/info');
         const data = await res.json();
         const ips = (data.ips || []).map(ip => `<code>${ip}</code>`).join(' ');
+        const version = data.version ? `version: <code>${data.version}</code> &middot; ` : '';
         document.getElementById('meta').innerHTML =
-          `host: <code>${data.hostname}</code> &middot; ${ips} &middot; ${new Date(data.time).toLocaleTimeString()}`;
+          `${version}host: <code>${data.hostname}</code> &middot; ${ips} &middot; ${new Date(data.time).toLocaleTimeString()}`;
       } catch (_) {}
     }
 

@@ -41,10 +41,12 @@ func main() {
 
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		hostname, _ := os.Hostname()
+		root := os.Getenv("HOME") + "/.pod_agents_config"
 		resp := map[string]any{
 			"hostname": hostname,
 			"ips":      localIPs(),
 			"time":     time.Now().Format(time.RFC3339),
+			"version":  readPodVersion(root),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -230,6 +232,25 @@ func readDefaultBase(root string) string {
 		}
 	}
 	return "alpine"
+}
+
+func readPodVersion(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "version.conf"))
+	if err != nil {
+		return "unknown"
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "POD_AGENTS_VERSION=") {
+			continue
+		}
+		v := strings.TrimPrefix(line, "POD_AGENTS_VERSION=")
+		v = strings.Trim(v, "\"' \t")
+		if v != "" {
+			return v
+		}
+	}
+	return "unknown"
 }
 
 // pod() in .pod_agents emits colored progress messages via `\033[…m` sequences.
