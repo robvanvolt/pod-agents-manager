@@ -1312,11 +1312,14 @@ EOF
             *)
                 cat <<USAGE
 Usage:
-  pod batch <prompts.txt>                       # all running pods
+  pod batch <prompts.txt>                       # all running pods (.txt or .json)
   pod batch <agent> <prompts.txt>               # all running pods of one agent
   pod batch <agent> <instance> <prompts.txt>    # one specific pod
   pod batch log [id]   | tmux | stats | list | stop [id]
   Optional flag: --concurrent  (per-pod parallelism instead of sequential)
+  Input formats:
+    .txt / plain  — one prompt per line, # comments ignored
+    .json         — [{"prompt":"..."}, ...] or ["...", ...]
 USAGE
                 return 1
                 ;;
@@ -1346,14 +1349,44 @@ USAGE
             return 1
         fi
 
-        local total
-        total=$(grep -cve '^[[:space:]]*$' "$prompts_file")
-        [ "$total" -eq 0 ] && { echo -e "\033[31mPrompts file is empty.\033[0m"; return 1; }
-
         local batch_id; batch_id="$(date +%Y%m%d-%H%M%S)-$$"
         local batch_dir="$batch_root/$batch_id"
         mkdir -p "$batch_dir/progress" "$batch_dir/logs"
-        cp "$prompts_file" "$batch_dir/prompts.txt"
+
+        # Normalise input: JSON array → one prompt per line plain text
+        local is_json=0
+        case "$prompts_file" in *.json) is_json=1 ;; esac
+        if [ "$is_json" = "0" ]; then
+            local _head; _head=$(head -c 1 "$prompts_file" 2>/dev/null)
+            [ "$_head" = "[" ] && is_json=1
+        fi
+        if [ "$is_json" = "1" ]; then
+            python3 - "$prompts_file" "$batch_dir/prompts.txt" <<'PYJSON'
+import sys, json
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    data = json.load(f)
+with open(dst, 'w') as out:
+    for item in data:
+        if isinstance(item, dict):
+            line = item.get('prompt') or item.get('text') or item.get('q') or item.get('question') or ''
+        else:
+            line = str(item)
+        line = line.strip()
+        if line:
+            out.write(line + '\n')
+PYJSON
+            if [ $? -ne 0 ]; then
+                echo -e "\033[31mFailed to parse JSON prompts file.\033[0m"
+                return 1
+            fi
+        else
+            cp "$prompts_file" "$batch_dir/prompts.txt"
+        fi
+
+        local total
+        total=$(grep -cve '^[[:space:]]*$' "$batch_dir/prompts.txt")
+        [ "$total" -eq 0 ] && { echo -e "\033[31mPrompts file is empty.\033[0m"; return 1; }
         {
             echo "batch_id=$batch_id"
             echo "started=$(date -Iseconds 2>/dev/null || date)"
