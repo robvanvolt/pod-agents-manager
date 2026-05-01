@@ -98,12 +98,13 @@ pod --help</code></pre>
 
 Actions:
   lifecycle: start stop restart status stats remove delete remove-all delete-all
-  interaction: join enter it tmux
+  interaction: join enter it tmux config
   image: prebuild update self-update cache-clean base
   batch: batch [tmux|stats|list|stop &lt;id&gt;|...]
   server: server {start|stop|restart|status|logs|build}
 
 Examples:
+  pod config
   pod self-update
   pod start pi dev all all alpine
   pod batch prompts.txt --concurrent
@@ -175,7 +176,7 @@ Examples:
           <h3>Host</h3>
           <ul>
             <li><code>~/.pod_agents</code> sourced as the <code>pod</code> function</li>
-            <li><code>~/.pod_agents_config/defaults.conf</code> for model and endpoint defaults</li>
+            <li><code>~/.pod_agents_config/.env</code> for model and endpoint defaults</li>
             <li><code>~/.config/containers/systemd/*.container</code> Quadlet templates</li>
             <li><code>~/Developer/&lt;agent&gt;-pods/&lt;instance&gt;/</code> persistent workspaces</li>
           </ul>
@@ -218,7 +219,7 @@ Examples:
         <article class="step-card">
           <span class="step-number">03</span>
           <h3>Configure your inference server</h3>
-          <pre><code>$EDITOR ~/.pod_agents_config/defaults.conf
+          <pre><code>pod config
 pod prebuild
 pod start pi dev</code></pre>
         </article>
@@ -273,7 +274,7 @@ pod start pi dev</code></pre>
         </article>
         <article>
           <h3>Interaction</h3>
-          <p><code>join</code>, <code>enter</code>, <code>it</code>, <code>tmux</code></p>
+          <p><code>join</code>, <code>enter</code>, <code>it</code>, <code>tmux</code>, <code>config</code></p>
         </article>
         <article>
           <h3>Batch</h3>

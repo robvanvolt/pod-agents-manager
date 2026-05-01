@@ -208,7 +208,7 @@ func listByExt(dir, ext string) []string {
 }
 
 func readDefaultBase(root string) string {
-	paths := []string{filepath.Join(root, ".env"), filepath.Join(root, "defaults.conf")}
+	paths := []string{filepath.Join(root, ".env")}
 	keys := []string{"POD_BASE_IMAGE=", "BASE_IMAGE="}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)

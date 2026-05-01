@@ -40,7 +40,7 @@ A small Go-backed web dashboard exposes the same control surface over the LAN �
 │                                                                            │
 │   ~/.pod_agents              ← single-file CLI (the `pod` function)        │
 │   ~/.pod_agents_config/                                                    │
-│     ├─ defaults.conf         ← OPENAI_BASE_URL, DEFAULT_MODEL, BASE_IMAGE  │
+│     ├─ .env                  ← POD_OPENAI_BASE_URL, POD_DEFAULT_MODEL, ... │
 │     ├─ agents/<name>.sh      ← agent plugins (build + config)              │
 │     ├─ flavors/*.containerfile   ← optional Containerfile snippets         │
 │     ├─ volumes/*.volumes     ← reusable named volume bundles               │
@@ -73,7 +73,7 @@ The shell function generates a Quadlet `*.container` template per agent, lets `s
 | `tmux` | optional but recommended | needed for `pod tmux` and `pod batch tmux` |
 | `go` | not required on host | the dashboard binary is built in a transient `golang:alpine` builder container if Go is missing |
 
-An OpenAI-compatible inference endpoint is what each agent talks to. The shipped default points at `http://192.168.178.67:8008/v1` (a local LM-Studio / vLLM / TGI box) — change it in `defaults.conf`.
+An OpenAI-compatible inference endpoint is what each agent talks to. The shipped default points at `http://192.168.178.67:8008/v1` (a local LM-Studio / vLLM / TGI box) — change it with `pod config` or in `~/.pod_agents_config/.env`.
 
 ## Installation
 
@@ -82,7 +82,7 @@ curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/main/
 exec bash -l
 
 # point it at your inference server (one-time)
-$EDITOR ~/.pod_agents_config/defaults.conf
+pod config
 
 # (optional) prebuild every agent's image so first `pod start` is instant
 pod prebuild
@@ -99,7 +99,7 @@ exec bash -l
 
 Tab-completion is registered automatically. Type `pod ` and hit `<Tab>`.
 
-To upgrade the manager itself later without touching your existing `defaults.conf` or extra custom files:
+To upgrade the manager itself later without touching your existing `.env` or extra custom files:
 
 ```bash
 pod self-update
@@ -145,6 +145,7 @@ Image management    pod prebuild [agent] [flavor] [volumes] [base]
                     pod self-update
                     pod cache-clean
 Interaction         pod join | enter | it [agent] [instance]
+                    pod config
                     pod tmux [instance]
 Batch prompting     pod batch <prompts.txt>
                     pod batch <agent> <prompts.txt>
