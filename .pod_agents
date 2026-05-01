@@ -48,6 +48,7 @@ POD_OPENAI_BASE_URL="${POD_OPENAI_BASE_URL}"
 POD_OPENAI_API_KEY="${POD_OPENAI_API_KEY}"
 POD_DEFAULT_MODEL="${POD_DEFAULT_MODEL}"
 POD_IMAGE_CACHE_ROOT="${POD_IMAGE_CACHE_ROOT}"
+POD_WORKSPACES_ROOT="${POD_WORKSPACES_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
 POD_BASE_IMAGE="${POD_BASE_IMAGE}"
 EOF
@@ -121,7 +122,7 @@ EOF
 
         printf '\033[1;36mConfiguring pod-agents-manager env at %s\033[0m\n' "$pod_env_file" > /dev/tty
 
-        for var_name in POD_OPENAI_BASE_URL POD_OPENAI_API_KEY POD_DEFAULT_MODEL POD_IMAGE_CACHE_ROOT POD_BASE_IMAGE; do
+        for var_name in POD_OPENAI_BASE_URL POD_OPENAI_API_KEY POD_DEFAULT_MODEL POD_IMAGE_CACHE_ROOT POD_WORKSPACES_ROOT POD_BASE_IMAGE; do
             case "$var_name" in
                 POD_OPENAI_BASE_URL)
                     prompt="OpenAI-compatible base URL"
@@ -141,6 +142,11 @@ EOF
                 POD_IMAGE_CACHE_ROOT)
                     prompt="Image cache root"
                     fallback="$HOME/.cache/podman-containers"
+                    secret=0
+                    ;;
+                POD_WORKSPACES_ROOT)
+                    prompt="Agent workspaces root"
+                    fallback="$HOME/Developer"
                     secret=0
                     ;;
                 POD_BASE_IMAGE)
@@ -201,6 +207,7 @@ EOF
             OPENAI_API_KEY="$POD_OPENAI_API_KEY"
             DEFAULT_MODEL="$POD_DEFAULT_MODEL"
             IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
+            WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
             BASE_IMAGE="$POD_BASE_IMAGE"
             printf '\033[32mSaved configuration to %s\033[0m\n' "$pod_env_file" > /dev/tty
         elif [ "$mode" = "missing" ]; then
@@ -229,6 +236,7 @@ EOF
         : "${POD_OPENAI_API_KEY:=rms-omlx}"
         : "${POD_DEFAULT_MODEL:=Qwen3.6-35B-A3B-8bit}"
         : "${POD_IMAGE_CACHE_ROOT:=$HOME/.cache/podman-containers}"
+        : "${POD_WORKSPACES_ROOT:=$HOME/Developer}"
         : "${POD_BASE_IMAGE:=alpine}"
         _pod_write_env_file "$pod_env_file"
     fi
@@ -239,12 +247,14 @@ EOF
     : "${POD_OPENAI_API_KEY:=${OPENAI_API_KEY:-rms-omlx}}"
     : "${POD_DEFAULT_MODEL:=${DEFAULT_MODEL:-Qwen3.6-35B-A3B-8bit}}"
     : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
+    : "${POD_WORKSPACES_ROOT:=${WORKSPACES_ROOT:-$HOME/Developer}}"
     : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
 
     OPENAI_BASE_URL="$POD_OPENAI_BASE_URL"
     OPENAI_API_KEY="$POD_OPENAI_API_KEY"
     DEFAULT_MODEL="$POD_DEFAULT_MODEL"
     IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
+    WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
     BASE_IMAGE="$POD_BASE_IMAGE"
 
     local initial_action="${1:-}"
@@ -661,7 +671,7 @@ EOF
                 local available_pods=()
                 [ "$selected_action" = "stats" ] && available_pods+=("All")
 
-                for agent_dir in "$HOME/Developer/"*-pods; do
+                for agent_dir in "$WORKSPACES_ROOT/"*-pods; do
                     [ -d "$agent_dir" ] || continue
                     local current_agent=$(basename "$agent_dir" | sed 's/-pods//')
                     for inst_dir in "$agent_dir"/*/; do
@@ -780,7 +790,7 @@ EOF
         echo -e "\033[36mWhat would you like to remove?\033[0m"
         echo "  1) Manager only        — removes ~/.pod_agents and the shell rc source line"
         echo "  2) + Config & images   — also removes ~/.pod_agents_config and all pod images"
-        echo "  3) + All pod volumes   — also removes ~/Developer/*-pods (DESTRUCTIVE: all agent workspaces gone)"
+        echo "  3) + All pod volumes   — also removes ${WORKSPACES_ROOT}/*-pods (DESTRUCTIVE: all agent workspaces gone)"
         echo "  0) Cancel"
         echo ""
         local uninstall_level=""
@@ -827,7 +837,7 @@ EOF
         if [ "$uninstall_level" -ge 3 ]; then
             echo -e "\033[31mStopping all pod services and removing pod volumes...\033[0m"
             local _u_agent _u_inst
-            for _u_agentdir in "$HOME/Developer/"*-pods; do
+            for _u_agentdir in "$WORKSPACES_ROOT/"*-pods; do
                 [ -d "$_u_agentdir" ] || continue
                 _u_agent="$(basename "$_u_agentdir" | sed 's/-pods$//')"
                 for _u_instdir in "$_u_agentdir"/*/; do
@@ -1325,7 +1335,7 @@ USAGE
             local pod_a="${n%%-*}"
             local pod_i="${n#*-}"
             [ "$pod_a" = "$n" ] && continue   # name had no dash
-            [ -d "$HOME/Developer/${pod_a}-pods/${pod_i}" ] || continue
+            [ -d "$WORKSPACES_ROOT/${pod_a}-pods/${pod_i}" ] || continue
             [ -n "$target_agent" ] && [ "$pod_a" != "$target_agent" ] && continue
             [ -n "$target_instance" ] && [ "$pod_i" != "$target_instance" ] && continue
             targets+=("${pod_a}-${pod_i}")
@@ -1486,7 +1496,7 @@ RUNNER
         echo -e "\033[1;33mRunning '$action_label --all' across all managed pods...\033[0m"
         local found_any="false"
 
-        for agent_dir in "$HOME/Developer/"*-pods; do
+        for agent_dir in "$WORKSPACES_ROOT/"*-pods; do
             [ -d "$agent_dir" ] || continue
             local current_agent
             current_agent="$(basename "$agent_dir" | sed 's/-pods$//')"
@@ -1508,7 +1518,7 @@ RUNNER
             done
         done
 
-        [ "$found_any" = "false" ] && echo -e "\033[33mNo managed pods found under $HOME/Developer.\033[0m"
+        [ "$found_any" = "false" ] && echo -e "\033[33mNo managed pods found under $WORKSPACES_ROOT.\033[0m"
         echo -e "\033[32mCompleted '$action_label --all'.\033[0m"
         return 0
     }
@@ -1549,7 +1559,7 @@ RUNNER
     if [ "$action" = "start" ] && [ -z "$instance" ] && [ -n "$agent" ]; then
         local names=("dev" "alpha" "beta" "gamma" "delta" "epsilon" "zeta" "eta" "theta" "iota" "kappa" "lambda" "mu" "nu" "xi" "omicron" "pi" "rho" "sigma" "tau" "upsilon" "phi" "chi" "psi" "omega")
         for n in "${names[@]}"; do
-            if [ ! -d "$HOME/Developer/${agent}-pods/$n" ]; then
+            if [ ! -d "$WORKSPACES_ROOT/${agent}-pods/$n" ]; then
                 instance="$n"
                 break
             fi
@@ -1574,7 +1584,7 @@ RUNNER
     local service_name="${agent}@${instance}.service"
     local container_name="${agent}-${instance}"
     local quadlet_file="$HOME/.config/containers/systemd/${agent}@.container"
-    local workspace_root="$HOME/Developer/${agent}-pods"
+    local workspace_root="$WORKSPACES_ROOT/${agent}-pods"
     local config_dir="$workspace_root/${instance}/config"
     local image_name="localhost/${agent}-agent-${flavor}-${BASE_IMAGE_TAG}:latest"
 
@@ -1618,8 +1628,8 @@ Description=${agent^} Agent Sandbox (%i)
 Image=${image_name}
 Pull=never
 ContainerName=${agent}-%i
-Volume=%h/Developer/${agent}-pods/%i/workspace:/workspace:Z
-Volume=%h/Developer/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z
+Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/workspace:/workspace:Z
+Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z
 Volume=%h/.pod_agents_config/skills:/srv/skills:ro,z
 ${dynamic_volumes}WorkingDir=/workspace
 Environment=OPENAI_BASE_URL=${OPENAI_BASE_URL}
@@ -1634,7 +1644,7 @@ Exec=sleep infinity
 
 [Service]
 TimeoutStartSec=15
-ExecStartPre=/usr/bin/mkdir -p %h/Developer/${agent}-pods/%i/workspace %h/Developer/${agent}-pods/%i/config
+ExecStartPre=/usr/bin/mkdir -p ${WORKSPACES_ROOT}/${agent}-pods/%i/workspace ${WORKSPACES_ROOT}/${agent}-pods/%i/config
 
 [Install]
 WantedBy=default.target
@@ -1761,8 +1771,8 @@ EOF
                 if [ -n "$instance" ] && [ "$agent" = "$a" ]; then
                     target_instances=("$instance")
                 else
-                    if [ -d "$HOME/Developer/${a}-pods" ]; then
-                        for d in "$HOME/Developer/${a}-pods"/*/; do
+                    if [ -d "$WORKSPACES_ROOT/${a}-pods" ]; then
+                        for d in "$WORKSPACES_ROOT/${a}-pods"/*/; do
                             [ -d "$d" ] || continue
                             target_instances+=("$(basename "$d")")
                         done
