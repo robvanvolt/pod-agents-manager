@@ -1394,6 +1394,8 @@ container=$(printf '%q' "$tgt")
 total=$total
 concurrent=$concurrent
 pod_manager_version=$(printf '%q' "${POD_AGENTS_VERSION:-unknown}")
+workspaces_root=$(printf '%q' "$WORKSPACES_ROOT")
+batch_invocation_dir=$(printf '%q' "$PWD")
 prog_file="\$batch_dir/progress/${tgt}.prog"
 log_file="\$batch_dir/logs/${tgt}.log"
 prompts="\$batch_dir/prompts.txt"
@@ -1424,6 +1426,7 @@ _je() {
 } >> "\$log_file"
 
 write_progress "0/\$total"
+touch "\$batch_dir/start-marker.${tgt}"
 
 i=0
 declare -a pids
@@ -1467,6 +1470,80 @@ date -Iseconds > "\$batch_dir/done.${tgt}" 2>/dev/null || date > "\$batch_dir/do
     echo "  Finished: \$(date -Iseconds 2>/dev/null || date)"
     echo "==================================================================="
 } >> "\$log_file"
+
+# --- Collect batch outputs ---
+_pod_name="\${container%%-*}"
+_pod_inst="\${container#*-}"
+_sessions_src="\${workspaces_root}/\${_pod_name}-pods/\${_pod_inst}/config/agent/sessions/--workspace--"
+_config_src="\${workspaces_root}/\${_pod_name}-pods/\${_pod_inst}/config/agent"
+_out_dir="\${batch_invocation_dir}/output/\${_pod_name}/\$(basename "\$batch_dir")"
+mkdir -p "\$_out_dir/sessions"
+
+if [ -d "\$_sessions_src" ]; then
+    find "\$_sessions_src" -maxdepth 1 -name "*.jsonl" -newer "\$batch_dir/start-marker.${tgt}" \\
+        -exec cp {} "\$_out_dir/sessions/" \; 2>/dev/null || true
+fi
+
+[ -f "\$_config_src/settings.json" ] && cp "\$_config_src/settings.json" "\$_out_dir/settings.json"
+[ -d "\$_config_src/skills" ] && cp -r "\$_config_src/skills" "\$_out_dir/" 2>/dev/null || true
+
+_n_sessions=\$(find "\$_out_dir/sessions" -name "*.jsonl" 2>/dev/null | wc -l | tr -d ' ')
+
+cat > "\$batch_dir/_stats_writer_${tgt}.py" <<'PYEOF'
+import json, os
+
+container    = os.environ.get('_CT', '')
+batch_dir    = os.environ.get('_BD', '')
+results_file = os.environ.get('_RF', '')
+total        = int(os.environ.get('_TOT', '0'))
+n_sessions   = int(os.environ.get('_NS', '0') or '0')
+
+results = []
+if os.path.exists(results_file):
+    with open(results_file) as f:
+        for ln in f:
+            ln = ln.strip()
+            if ln:
+                try: results.append(json.loads(ln))
+                except: pass
+
+n         = len(results)
+total_dur = sum(r.get('duration_s', 0) for r in results)
+avg       = round(total_dur / n, 2) if n else 0
+
+started = source_file = finished = ''
+meta_path = os.path.join(batch_dir, 'meta.conf')
+if os.path.exists(meta_path):
+    with open(meta_path) as f:
+        for line in f:
+            if line.startswith('started='):
+                started = line.split('=', 1)[1].strip()
+            elif line.startswith('source='):
+                source_file = line.split('=', 1)[1].strip()
+
+done_path = os.path.join(batch_dir, f'done.{container}')
+if os.path.exists(done_path):
+    with open(done_path) as f:
+        finished = f.read().strip()
+
+print(json.dumps({
+    'batch_id':          os.path.basename(batch_dir),
+    'pod':               container,
+    'input_file':        source_file,
+    'started_at':        started,
+    'finished_at':       finished,
+    'total_prompts':     total,
+    'processed':         n,
+    'sessions_collected': n_sessions,
+    'total_duration_s':  total_dur,
+    'avg_duration_s':    avg,
+}, indent=2))
+PYEOF
+_BD="\$batch_dir" _CT="\$container" \\
+    _RF="\$batch_dir/logs/${tgt}.results.jsonl" \\
+    _TOT="\$total" _NS="\$_n_sessions" \\
+    python3 "\$batch_dir/_stats_writer_${tgt}.py" > "\$_out_dir/stats.json" 2>/dev/null || true
+echo -e "\033[1;32m  Output saved to: \$_out_dir\033[0m"
 RUNNER
             chmod +x "$runner"
             nohup "$runner" >"$batch_dir/logs/${tgt}.runner.log" 2>&1 < /dev/null &
