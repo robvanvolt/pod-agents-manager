@@ -12,6 +12,7 @@
   <meta property="og:url" content="https://robvanvolt.github.io/pod-agents-manager/">
   <meta property="og:image" content="https://robvanvolt.github.io/pod-agents-manager/social-card.svg">
   <link rel="canonical" href="https://robvanvolt.github.io/pod-agents-manager/">
+  <link rel="icon" href="./favicon.ico" sizes="any">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -21,7 +22,7 @@
     <nav class="nav" aria-label="Primary navigation">
       <a class="brand" href="#top" aria-label="Pod Agents Manager home">
         <span class="brand-mark" aria-hidden="true">
-          <span class="brand-mark-core"></span>
+          <img src="./logo.svg" alt="">
         </span>
         <span>
           <strong>Pod Agents Manager</strong>
@@ -67,10 +68,14 @@
       </div>
 
       <aside class="hero-card" aria-label="Quick command preview">
+        <div class="code-card-head">
+          <span>Quick start shell</span>
+          <button class="copy-button" type="button" data-copy-target="quickstart-example">Copy</button>
+        </div>
         <div class="terminal-bar">
           <span></span><span></span><span></span>
         </div>
-        <pre><code>git clone https://github.com/robvanvolt/pod-agents-manager.git
+        <pre><code id="quickstart-example">git clone https://github.com/robvanvolt/pod-agents-manager.git
 cd pod-agents-manager
 
 cp .pod_agents ~/
@@ -78,10 +83,37 @@ cp -r .pod_agents_config ~/
 echo '[ -f "$HOME/.pod_agents" ] &amp;&amp; source "$HOME/.pod_agents"' &gt;&gt; ~/.bashrc
 exec bash -l
 
-pod start pi dev
-pod tmux
-pod server start</code></pre>
+# pod start pi dev
+# pod tmux
+pod server start
+pod --help</code></pre>
       </aside>
+    </section>
+
+    <section class="section split" id="pod-help">
+      <div>
+        <p class="section-kicker">CLI help</p>
+        <h2><code>pod --help</code> prints structured, script-friendly usage.</h2>
+      </div>
+      <div class="batch-panel">
+        <pre><code>Usage:
+  pod [--help|-h]
+  pod [--version|-v]
+  pod &lt;action&gt; [agent] [instance] [flavor] [volumes] [base]
+
+Actions:
+  lifecycle: start stop restart status stats remove delete remove-all delete-all
+  interaction: join enter it tmux
+  image: prebuild update cache-clean base
+  batch: batch [tmux|stats|list|stop &lt;id&gt;|...]
+  server: server {start|stop|restart|status|logs|build}
+
+Examples:
+  pod start pi dev all all alpine
+  pod batch prompts.txt --concurrent
+  pod server start
+  pod --version</code></pre>
+      </div>
     </section>
 
     <section class="section trust-strip" aria-label="Project highlights">
@@ -369,6 +401,7 @@ pod batch stop 20260430-120000</code></pre>
           The project is Apache 2.0 licensed and intentionally small: a Bash function, agent plugins, Containerfile
           snippets, and a Go dashboard you can inspect in one sitting.
         </p>
+        <p class="pr-welcome">Pull requests for additional standard flavors, agents, and skills are welcome.</p>
       </div>
       <div class="hero-actions">
         <a class="button primary" href="https://github.com/robvanvolt/pod-agents-manager">Star on GitHub</a>

@@ -162,8 +162,8 @@ pre code {
 .brand-mark {
   position: relative;
   display: grid;
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 2.8rem;
+  height: 2.8rem;
   place-items: center;
   border: 1px solid rgba(104, 225, 253, 0.35);
   border-radius: 0.85rem;
@@ -173,32 +173,21 @@ pre code {
   box-shadow: 0 10px 30px rgba(104, 225, 253, 0.13);
 }
 
-.brand-mark::before,
-.brand-mark::after,
-.brand-mark-core {
-  position: absolute;
-  content: "";
-  border-radius: 999px;
-  background: var(--brand);
-}
-
-.brand-mark::before {
-  width: 0.44rem;
-  height: 0.44rem;
-  transform: translate(-0.44rem, -0.08rem);
+.brand-mark img {
+  width: 1.8rem;
+  height: 1.8rem;
+  object-fit: contain;
+  filter: grayscale(1) brightness(1.95) contrast(1.2);
 }
 
 .brand-mark::after {
-  width: 0.44rem;
-  height: 0.44rem;
-  transform: translate(0.44rem, -0.08rem);
-}
-
-.brand-mark-core {
-  width: 1.12rem;
-  height: 0.32rem;
-  transform: translateY(0.58rem);
-  opacity: 0.82;
+  position: absolute;
+  inset: 0.24rem;
+  border-radius: 0.65rem;
+  content: "";
+  background: linear-gradient(145deg, rgba(104, 225, 253, 0.48), rgba(167, 139, 250, 0.46));
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 
 .nav-links {
@@ -241,7 +230,7 @@ pre code {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.78fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(420px, 1.05fr);
   align-items: center;
   gap: 3rem;
   min-height: calc(100vh - 76px);
@@ -269,8 +258,9 @@ pre code {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 999px;
-  background: var(--brand-3);
-  box-shadow: 0 0 0 0.4rem rgba(52, 211, 153, 0.12);
+  background: #34d399;
+  box-shadow: 0 0 0 0.38rem rgba(52, 211, 153, 0.12);
+  animation: pulse-shift 2.2s ease-in-out infinite;
 }
 
 h1,
@@ -284,7 +274,7 @@ h3 {
 
 h1 {
   max-width: 880px;
-  font-size: clamp(3.1rem, 9vw, 6.7rem);
+  font-size: clamp(2.15rem, 5.2vw, 4.25rem);
 }
 
 h2 {
@@ -375,7 +365,8 @@ p {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius-lg);
-  padding: 1.05rem;
+  padding: 1.15rem;
+  min-width: 0;
 }
 
 .hero-card::before {
@@ -422,6 +413,10 @@ p {
   border-radius: 1.05rem;
   background: rgba(3, 7, 18, 0.6);
   padding: 1.1rem;
+}
+
+.hero-card pre {
+  min-height: 22rem;
 }
 
 .trust-strip {
@@ -712,6 +707,11 @@ p {
   margin-top: 1rem;
 }
 
+.pr-welcome {
+  margin-top: 0.8rem;
+  color: #cde7ff;
+}
+
 .site-footer {
   display: flex;
   justify-content: space-between;
@@ -763,6 +763,25 @@ p {
 
   .footer-cta {
     align-items: flex-start;
+  }
+}
+
+@keyframes pulse-shift {
+  0% {
+    background: #34d399;
+    box-shadow: 0 0 0 0.32rem rgba(52, 211, 153, 0.12), 0 0 0.25rem rgba(52, 211, 153, 0.6);
+  }
+  33% {
+    background: #68e1fd;
+    box-shadow: 0 0 0 0.44rem rgba(104, 225, 253, 0.14), 0 0 0.35rem rgba(104, 225, 253, 0.6);
+  }
+  66% {
+    background: #a78bfa;
+    box-shadow: 0 0 0 0.4rem rgba(167, 139, 250, 0.14), 0 0 0.35rem rgba(167, 139, 250, 0.6);
+  }
+  100% {
+    background: #34d399;
+    box-shadow: 0 0 0 0.32rem rgba(52, 211, 153, 0.12), 0 0 0.25rem rgba(52, 211, 153, 0.6);
   }
 }
 

@@ -31,6 +31,7 @@ A small Go-backed web dashboard exposes the same control surface over the LAN â€
 - **Native LAN dashboard.** `pod server start` runs a small static Go binary on the host (no nested containers, uses the host's Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, info, action, and create.
 - **Skills are first-class.** `~/.pod_agents_config/skills/` is read-only-mounted into every pod at `/srv/skills`, then symlinked into each agent's expected path. Update once, every agent sees it.
 - **Config persistence done right.** Per-instance workspaces live at `~/Developer/<agent>-pods/<instance>/`. Removing a pod doesn't touch its data; `delete` does.
+- **Contributions welcome.** Pull requests for additional standard flavors, agents, and skills are welcome.
 
 ## Architecture
 

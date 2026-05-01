@@ -5,6 +5,8 @@ pod() {
     local config_dir_flavors="$config_dir_root/flavors"
     local config_dir_skills="$config_dir_root/skills"
     local config_dir_volumes="$config_dir_root/volumes"
+    local pod_version_file="$config_dir_root/version.conf"
+    local pod_version_default="0.2.0"
 
 
     # 1. Setup & Discovery
@@ -209,6 +211,54 @@ EOF
     }
 
     # 2. Interactive CLI Mode
+    if [ -f "$pod_version_file" ]; then
+        # shellcheck disable=SC1090
+        source "$pod_version_file"
+    fi
+    : "${POD_AGENTS_VERSION:=$pod_version_default}"
+
+    _pod_print_version() {
+        printf 'pod-agents-manager %s\n' "$POD_AGENTS_VERSION"
+    }
+
+    _pod_print_help() {
+        cat <<EOF
+pod-agents-manager ${POD_AGENTS_VERSION}
+
+Usage:
+  pod [--help|-h]
+  pod [--version|-v]
+  pod <action> [agent] [instance] [flavor] [volumes] [base]
+
+Actions:
+  lifecycle    start stop restart status stats remove delete remove-all delete-all
+  interaction  join enter it tmux
+  images       prebuild update cache-clean base
+  batch        batch [tmux|stats|list|stop <id>|...]
+  server       server {start|stop|restart|status|logs|build}
+
+Examples:
+  pod start pi dev all all alpine
+  pod join pi dev
+  pod batch prompts.txt --concurrent
+  pod server start
+  pod --version
+EOF
+    }
+
+    if [ "$#" -gt 0 ]; then
+        case "$1" in
+            -h|--help|help)
+                _pod_print_help
+                return 0
+                ;;
+            -v|--version|version)
+                _pod_print_version
+                return 0
+                ;;
+        esac
+    fi
+
     if [ "$#" -eq 0 ]; then
         local options=("start" "stop" "restart" "update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "batch" "server" "base" "cache-clean" "quit")
         local selected_action=""
@@ -1310,6 +1360,11 @@ EOF
             podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
         it) podman exec -it "$container_name" bash ;;
+        *)
+            echo "Unknown action: $action"
+            _pod_print_help
+            return 1
+            ;;
     esac
 }
-complete -W "start stop restart update prebuild status stats remove delete remove-all delete-all join enter it tmux batch server base cache-clean quit" pod
+complete -W "start stop restart update prebuild status stats remove delete remove-all delete-all join enter it tmux batch server base cache-clean quit help version --help --version -h -v" pod
