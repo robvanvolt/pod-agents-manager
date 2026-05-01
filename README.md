@@ -18,8 +18,6 @@
 
 `pod` is a single-file Bash function that turns any Linux box with rootless Podman into a multi-tenant home for local coding agents — Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and anything else you wrap. Each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
 
-Full project documentation is available at **[robvanvolt.github.io/pod-agents-manager](https://robvanvolt.github.io/pod-agents-manager/)**.
-
 A small Go-backed web dashboard exposes the same control surface over the LAN — including a "create new pod" form, live `podman stats`, and one-click start/stop/restart/delete.
 
 ## Highlights
