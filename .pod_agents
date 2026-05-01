@@ -6,7 +6,10 @@ pod() {
     local config_dir_skills="$config_dir_root/skills"
     local config_dir_volumes="$config_dir_root/volumes"
     local pod_version_file="$config_dir_root/version.conf"
-    local pod_version_default="0.2.1"
+    local pod_env_file="$config_dir_root/.env"
+    local pod_env_example_file="$config_dir_root/.env.example"
+    local pod_legacy_defaults_file="$config_dir_root/defaults.conf"
+    local pod_version_default="0.2.2"
 
 
     # 1. Setup & Discovery
@@ -39,21 +42,50 @@ pod() {
         echo "# Base node image only; no extra flavors added." > "$config_dir_flavors/none.containerfile"
     fi
 
-    if [ -f "$config_dir_root/defaults.conf" ]; then
-        source "$config_dir_root/defaults.conf"
-    else
-        cat <<EOF > "$config_dir_root/defaults.conf"
-OPENAI_BASE_URL="http://192.168.178.67:8008/v1"
-OPENAI_API_KEY="rms-omlx"
-DEFAULT_MODEL="Qwen3.6-35B-A3B-8bit"
-IMAGE_CACHE_ROOT="\$HOME/.cache/podman-containers"
+    _pod_write_env_file() {
+        local target_file="$1"
+        cat <<EOF > "$target_file"
+POD_OPENAI_BASE_URL="${POD_OPENAI_BASE_URL}"
+POD_OPENAI_API_KEY="${POD_OPENAI_API_KEY}"
+POD_DEFAULT_MODEL="${POD_DEFAULT_MODEL}"
+POD_IMAGE_CACHE_ROOT="${POD_IMAGE_CACHE_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
-BASE_IMAGE="alpine"
+POD_BASE_IMAGE="${POD_BASE_IMAGE}"
 EOF
-        source "$config_dir_root/defaults.conf"
+    }
+
+    if [ -f "$pod_env_file" ]; then
+        source "$pod_env_file"
+    elif [ -f "$pod_legacy_defaults_file" ]; then
+        source "$pod_legacy_defaults_file"
+        : "${POD_OPENAI_BASE_URL:=${OPENAI_BASE_URL:-http://192.168.178.67:8008/v1}}"
+        : "${POD_OPENAI_API_KEY:=${OPENAI_API_KEY:-rms-omlx}}"
+        : "${POD_DEFAULT_MODEL:=${DEFAULT_MODEL:-Qwen3.6-35B-A3B-8bit}}"
+        : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
+        : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
+        _pod_write_env_file "$pod_env_file"
+    else
+        : "${POD_OPENAI_BASE_URL:=http://192.168.178.67:8008/v1}"
+        : "${POD_OPENAI_API_KEY:=rms-omlx}"
+        : "${POD_DEFAULT_MODEL:=Qwen3.6-35B-A3B-8bit}"
+        : "${POD_IMAGE_CACHE_ROOT:=$HOME/.cache/podman-containers}"
+        : "${POD_BASE_IMAGE:=alpine}"
+        _pod_write_env_file "$pod_env_file"
     fi
-    # Backfill BASE_IMAGE on configs that pre-date this option.
-    : "${BASE_IMAGE:=alpine}"
+
+    [ -f "$pod_env_example_file" ] || _pod_write_env_file "$pod_env_example_file"
+
+    : "${POD_OPENAI_BASE_URL:=${OPENAI_BASE_URL:-http://192.168.178.67:8008/v1}}"
+    : "${POD_OPENAI_API_KEY:=${OPENAI_API_KEY:-rms-omlx}}"
+    : "${POD_DEFAULT_MODEL:=${DEFAULT_MODEL:-Qwen3.6-35B-A3B-8bit}}"
+    : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
+    : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
+
+    OPENAI_BASE_URL="$POD_OPENAI_BASE_URL"
+    OPENAI_API_KEY="$POD_OPENAI_API_KEY"
+    DEFAULT_MODEL="$POD_DEFAULT_MODEL"
+    IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
+    BASE_IMAGE="$POD_BASE_IMAGE"
 
     # Resolve a base shorthand or explicit tag to (full_image, short_tag).
     # Used for both the Containerfile FROM line and image-name tagging.
@@ -285,7 +317,8 @@ EOF
 
         mkdir -p "$config_dir_root"
         cp "$src_root/.pod_agents" "$HOME/.pod_agents"
-        [ -f "$config_dir_root/defaults.conf" ] || cp "$src_root/.pod_agents_config/defaults.conf" "$config_dir_root/defaults.conf"
+        [ -f "$config_dir_root/.env" ] || cp "$src_root/.pod_agents_config/.env" "$config_dir_root/.env"
+        cp "$src_root/.pod_agents_config/.env.example" "$config_dir_root/.env.example"
         cp "$src_root/.pod_agents_config/version.conf" "$config_dir_root/version.conf"
         _pod_merge_tree "$src_root/.pod_agents_config/agents" "$config_dir_agents"
         _pod_merge_tree "$src_root/.pod_agents_config/flavors" "$config_dir_flavors"
@@ -525,7 +558,7 @@ EOF
         : "${POD_AGENTS_VERSION:=$pod_version_default}"
 
         echo -e "\033[32mUpdated pod-agents-manager to ${POD_AGENTS_VERSION}.\033[0m"
-        echo -e "\033[36mdefaults.conf and any extra custom files were left in place.\033[0m"
+        echo -e "\033[36m.env and any extra custom files were left in place.\033[0m"
         return 0
     fi
 
@@ -537,12 +570,12 @@ EOF
             return 0
         fi
         _resolve_base_image "$new_base"
-        if [ -f "$config_dir_root/defaults.conf" ]; then
-            if grep -q '^BASE_IMAGE=' "$config_dir_root/defaults.conf"; then
-                sed -i.bak -E "s|^BASE_IMAGE=.*|BASE_IMAGE=\"${new_base}\"|" "$config_dir_root/defaults.conf"
-                rm -f "$config_dir_root/defaults.conf.bak"
+        if [ -f "$pod_env_file" ]; then
+            if grep -q '^POD_BASE_IMAGE=' "$pod_env_file"; then
+                sed -i.bak -E "s|^POD_BASE_IMAGE=.*|POD_BASE_IMAGE=\"${new_base}\"|" "$pod_env_file"
+                rm -f "$pod_env_file.bak"
             else
-                printf '\nBASE_IMAGE="%s"\n' "$new_base" >> "$config_dir_root/defaults.conf"
+                printf '\nPOD_BASE_IMAGE="%s"\n' "$new_base" >> "$pod_env_file"
             fi
         fi
         echo -e "\033[32mDefault base image set to '${new_base}' (${BASE_IMAGE_FULL}).\033[0m"

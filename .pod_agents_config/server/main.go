@@ -57,7 +57,7 @@ func main() {
 			"flavors":     append([]string{"all"}, listByExt(filepath.Join(root, "flavors"), ".containerfile")...),
 			"volumes":     append([]string{"all", "none"}, listByExt(filepath.Join(root, "volumes"), ".volumes")...),
 			"bases":       []string{"alpine", "trixie-slim"},
-			"defaultBase": readDefaultBase(filepath.Join(root, "defaults.conf")),
+			"defaultBase": readDefaultBase(root),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -207,20 +207,26 @@ func listByExt(dir, ext string) []string {
 	return out
 }
 
-func readDefaultBase(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "alpine"
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "BASE_IMAGE=") {
+func readDefaultBase(root string) string {
+	paths := []string{filepath.Join(root, ".env"), filepath.Join(root, "defaults.conf")}
+	keys := []string{"POD_BASE_IMAGE=", "BASE_IMAGE="}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
 			continue
 		}
-		v := strings.TrimPrefix(line, "BASE_IMAGE=")
-		v = strings.Trim(v, "\"' \t")
-		if v != "" {
-			return v
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			for _, key := range keys {
+				if !strings.HasPrefix(line, key) {
+					continue
+				}
+				v := strings.TrimPrefix(line, key)
+				v = strings.Trim(v, "\"' \t")
+				if v != "" {
+					return v
+				}
+			}
 		}
 	}
 	return "alpine"

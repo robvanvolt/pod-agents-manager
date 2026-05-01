@@ -78,7 +78,7 @@ An OpenAI-compatible inference endpoint is what each agent talks to. The shipped
 ## Installation
 
 ```bash
-curl -fsSL https://paperclip.gxl.ai/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/main/install.sh | bash
 exec bash -l
 
 # point it at your inference server (one-time)
