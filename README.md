@@ -60,6 +60,8 @@ A small Go-backed web dashboard exposes the same control surface over the LAN â€
 
 The shell function generates a Quadlet `*.container` template per agent, lets `systemctl --user daemon-reload` materialize it into a transient unit, and starts the pod via `systemctl --user start <agent>@<instance>.service`. Builds are cached at `~/.cache/podman-containers/`; image tags include both flavor and base, so cache hits are exact.
 
+`pod update` rebuilds and restarts agent images for running instances. `pod self-update` refreshes the manager itself by downloading the latest repository snapshot and updating the managed files in `~/.pod_agents` and `~/.pod_agents_config/`.
+
 ## Requirements
 
 | Component | Minimum | Notes |
@@ -76,26 +78,32 @@ An OpenAI-compatible inference endpoint is what each agent talks to. The shipped
 ## Installation
 
 ```bash
-# 1. clone (or copy the two paths) onto the host
-git clone https://github.com/robvanvolt/pod-agents-manager.git
-cd pod-agents-manager
-
-# 2. install the function and config tree to your home
-cp .pod_agents              ~/
-cp -r .pod_agents_config    ~/
-
-# 3. wire the function into your shell
-echo '[ -f "$HOME/.pod_agents" ] && source "$HOME/.pod_agents"' >> ~/.bashrc
+curl -fsSL https://paperclip.gxl.ai/install.sh | bash
 exec bash -l
 
-# 4. point it at your inference server (one-time)
+# point it at your inference server (one-time)
 $EDITOR ~/.pod_agents_config/defaults.conf
 
-# 5. (optional) prebuild every agent's image so first `pod start` is instant
+# (optional) prebuild every agent's image so first `pod start` is instant
 pod prebuild
 ```
 
+Manual install still works if you prefer a local clone:
+
+```bash
+git clone https://github.com/robvanvolt/pod-agents-manager.git
+cd pod-agents-manager
+bash ./install.sh
+exec bash -l
+```
+
 Tab-completion is registered automatically. Type `pod ` and hit `<Tab>`.
+
+To upgrade the manager itself later without touching your existing `defaults.conf` or extra custom files:
+
+```bash
+pod self-update
+```
 
 ## Quickstart
 
@@ -134,6 +142,7 @@ Lifecycle           pod start | stop | restart | status | stats
                     pod remove | delete | remove-all | delete-all
 Image management    pod prebuild [agent] [flavor] [volumes] [base]
                     pod update   [agent] [instance]
+                    pod self-update
                     pod cache-clean
 Interaction         pod join | enter | it [agent] [instance]
                     pod tmux [instance]

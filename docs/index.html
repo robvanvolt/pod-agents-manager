@@ -12,7 +12,7 @@
   <meta property="og:url" content="https://robvanvolt.github.io/pod-agents-manager/">
   <meta property="og:image" content="https://robvanvolt.github.io/pod-agents-manager/social-card.svg">
   <link rel="canonical" href="https://robvanvolt.github.io/pod-agents-manager/">
-  <link rel="icon" href="./favicon.ico" sizes="any">
+  <link rel="icon" href="./logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -75,13 +75,8 @@
         <div class="terminal-bar">
           <span></span><span></span><span></span>
         </div>
-        <pre><code id="quickstart-example">git clone https://github.com/robvanvolt/pod-agents-manager.git
-cd pod-agents-manager
-
-cp .pod_agents ~/
-cp -r .pod_agents_config ~/
-echo '[ -f "$HOME/.pod_agents" ] &amp;&amp; source "$HOME/.pod_agents"' &gt;&gt; ~/.bashrc
-exec bash -l
+        <pre><code id="quickstart-example">curl -fsSL https://paperclip.gxl.ai/install.sh | bash
+      exec bash -l
 
 # pod start pi dev
 # pod tmux
@@ -104,11 +99,12 @@ pod --help</code></pre>
 Actions:
   lifecycle: start stop restart status stats remove delete remove-all delete-all
   interaction: join enter it tmux
-  image: prebuild update cache-clean base
+  image: prebuild update self-update cache-clean base
   batch: batch [tmux|stats|list|stop &lt;id&gt;|...]
   server: server {start|stop|restart|status|logs|build}
 
 Examples:
+  pod self-update
   pod start pi dev all all alpine
   pod batch prompts.txt --concurrent
   pod server start
@@ -205,23 +201,19 @@ Examples:
     <section class="section install" id="install">
       <div class="section-heading">
         <p class="section-kicker">Install</p>
-        <h2>Copy two paths, source one function, start a pod.</h2>
+        <h2>Install with one command, source one function, start a pod.</h2>
         <p>Requirements: Linux, Bash 4+, rootless Podman, systemd user services, and an OpenAI-compatible inference endpoint.</p>
       </div>
       <div class="steps">
         <article class="step-card">
           <span class="step-number">01</span>
           <h3>Install the CLI and config tree</h3>
-          <pre><code>git clone https://github.com/robvanvolt/pod-agents-manager.git
-cd pod-agents-manager
-cp .pod_agents ~/
-cp -r .pod_agents_config ~/</code></pre>
+          <pre><code>curl -fsSL https://paperclip.gxl.ai/install.sh | bash</code></pre>
         </article>
         <article class="step-card">
           <span class="step-number">02</span>
           <h3>Load the <code>pod</code> function</h3>
-          <pre><code>echo '[ -f "$HOME/.pod_agents" ] &amp;&amp; source "$HOME/.pod_agents"' &gt;&gt; ~/.bashrc
-exec bash -l</code></pre>
+          <pre><code>exec bash -l</code></pre>
         </article>
         <article class="step-card">
           <span class="step-number">03</span>
@@ -277,7 +269,7 @@ pod start pi dev</code></pre>
         </article>
         <article>
           <h3>Images</h3>
-          <p><code>prebuild</code>, <code>update</code>, <code>cache-clean</code>, <code>base</code></p>
+          <p><code>prebuild</code>, <code>update</code>, <code>self-update</code>, <code>cache-clean</code>, <code>base</code></p>
         </article>
         <article>
           <h3>Interaction</h3>
