@@ -1,5 +1,7 @@
 AGENT_VOLUME_CONFIG_PATH="/root/.config/crush"
 
+AGENT_BATCH_INVOKE='crush run "$PROMPT"'
+
 agent_build_containerfile() {
     local build_dir="$1"
     local flavor="$2"
@@ -30,7 +32,7 @@ agent_generate_config() {
 {
   "\$schema": "https://charm.land/crush.json",
   "providers": { "custom_env": { "type": "openai-compat", "base_url": "${OPENAI_BASE_URL}", "api_key": "${OPENAI_API_KEY}", "models": [${crush_models_json}] } },
-  "options": { "disable_metrics": true, "disable_provider_auto_update": true, "disable_default_providers": true, "skills_paths": ["/srv/skills"] }
+  "options": { "disable_metrics": true, "disable_provider_auto_update": true, "disable_default_providers": true }
 }
 EOF
     mv -f "$temp_cfg" "$config_dir/crush.json"

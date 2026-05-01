@@ -1176,9 +1176,9 @@ EOF
                     local logf="${rest#*|}"
                     local title="${tgt} (${bid})"
                     if [ "$i" -eq 0 ]; then
-                        tmux new-session -d -s "$session" -n "batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash'"
+                        tmux new-session -d -s "$session" -n "batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash -il'"
                     else
-                        tmux split-window -t "${session}:batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash'"
+                        tmux split-window -t "${session}:batch" "bash -lc 'echo === $title ===; tail -F \"$logf\" 2>/dev/null; exec bash -il'"
                         tmux select-layout -t "${session}:batch" tiled
                     fi
                 done
@@ -1394,6 +1394,11 @@ write_progress() {
     printf '%s\n' "\$v" > "\$prog_file.tmp" && mv -f "\$prog_file.tmp" "\$prog_file"
 }
 
+_je() {
+    printf '%s' "\$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().rstrip("\n")))' 2>/dev/null \\
+        || printf '"%s"' "\$(printf '%s' "\$1" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')"
+}
+
 # Write session header to log
 {
     echo "==================================================================="
@@ -1421,7 +1426,14 @@ while IFS= read -r line || [ -n "\$line" ]; do
         pids+=(\$!)
     else
         printf '\n=== [%d/%d] %s ===\n' "\$i" "\$total" "\$line" >> "\$log_file"
+        _t0=\$(date +%s)
+        _t0_iso=\$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
         podman exec -e PROMPT="\$line" "\$container" bash -lc "\$invoke" >>"\$log_file" 2>&1
+        _ec=\$?
+        _t1=\$(date +%s)
+        _t1_iso=\$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')
+        _dur=\$(( \$_t1 - \$_t0 ))
+        printf '{"i":%d,"total":%d,"pod":"%s","prompt":%s,"exit_code":%d,"started_at":"%s","finished_at":"%s","duration_s":%d}\n' "\$i" "\$total" "\$container" "\$(_je "\$line")" "\$_ec" "\$_t0_iso" "\$_t1_iso" "\$_dur" >> "\$batch_dir/logs/${tgt}.results.jsonl"
         write_progress "\$i/\$total"
     fi
 done < "\$prompts"

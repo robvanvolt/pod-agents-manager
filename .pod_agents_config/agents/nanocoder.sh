@@ -3,8 +3,12 @@ AGENT_VOLUME_CONFIG_PATH="/root/.config/nanocoder"
 agent_build_containerfile() {
     local build_dir="$1"
     local flavor="$2"
-    write_base_node_containerfile "$build_dir" "$flavor"
+    # node-llama-cpp requires glibc and build tools — force Debian regardless of POD_BASE_IMAGE
+    write_base_node_containerfile "$build_dir" "$flavor" "trixie-slim"
     cat <<'EOF' >> "$build_dir/Containerfile"
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    apt-get install -y cmake make python3 && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @nanocollective/nanocoder && npm cache clean --force
 CMD ["tail", "-f", "/dev/null"]
 EOF
