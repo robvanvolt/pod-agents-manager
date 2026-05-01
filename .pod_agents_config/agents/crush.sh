@@ -30,7 +30,7 @@ agent_generate_config() {
 {
   "\$schema": "https://charm.land/crush.json",
   "providers": { "custom_env": { "type": "openai-compat", "base_url": "${OPENAI_BASE_URL}", "api_key": "${OPENAI_API_KEY}", "models": [${crush_models_json}] } },
-  "options": { "disable_metrics": true, "disable_provider_auto_update": true, "disable_default_providers": true }
+  "options": { "disable_metrics": true, "disable_provider_auto_update": true, "disable_default_providers": true, "skills_paths": ["/srv/skills"] }
 }
 EOF
     mv -f "$temp_cfg" "$config_dir/crush.json"

@@ -1507,26 +1507,29 @@ RUNNER
     fi
 
     if { [ "$action" = "join" ] || [ "$action" = "enter" ] || [ "$action" = "it" ]; } && [ -z "$instance" ]; then
-        local found_agent=""
-        local found_instance=""
-        for agent_dir in "$HOME/Developer/"${agent:-*}-pods; do
-            [ -d "$agent_dir" ] || continue
-            local curr_agent
-            curr_agent=$(basename "$agent_dir" | sed 's/-pods$//')
-            for inst_dir in "$agent_dir"/*/; do
-                [ -d "$inst_dir" ] || continue
-                found_agent="$curr_agent"
-                found_instance=$(basename "$inst_dir")
-                break 2
-            done
-        done
-        
-        if [ -n "$found_agent" ] && [ -n "$found_instance" ]; then
-            agent="$found_agent"
-            instance="$found_instance"
-            echo -e "\033[36mAuto-selected pod: ${agent}-${instance}\033[0m"
+        local found_name=""
+        if [ -n "$agent" ]; then
+            found_name=$(podman ps --format '{{.Names}}' | grep "^${agent}-" | head -n 1)
         else
-            echo -e "\033[31mNo existing pods found to $action.\033[0m"
+            for _a in "${available_agents[@]}"; do
+                found_name=$(podman ps --format '{{.Names}}' | grep "^${_a}-" | head -n 1)
+                [ -n "$found_name" ] && break
+            done
+        fi
+
+        if [ -n "$found_name" ]; then
+            if [ -z "$agent" ]; then
+                for _a in "${available_agents[@]}"; do
+                    if [[ "$found_name" == "${_a}-"* ]]; then
+                        agent="$_a"
+                        break
+                    fi
+                done
+            fi
+            instance="${found_name#${agent}-}"
+            echo -e "\033[36mAuto-selected pod: ${found_name}\033[0m"
+        else
+            echo -e "\033[31mNo running pods found to $action.\033[0m"
             return 1
         fi
     fi
