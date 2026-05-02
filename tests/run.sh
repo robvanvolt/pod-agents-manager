@@ -237,6 +237,28 @@ t_pod_version_runs() {
     printf '%s' "$out" | grep -qE '^pod-agents-manager [0-9]+\.[0-9]+\.[0-9]+'
 }
 
+# `pod --version` must reflect the value in version.conf — guards against a
+# future refactor accidentally returning the `pod_version_default` fallback
+# baked into .pod_agents (which exists only for the case where version.conf
+# is missing or unreadable).
+t_pod_version_matches_conf() {
+    local sandbox out conf_version reported_version
+    conf_version=$(grep '^POD_AGENTS_VERSION=' .pod_agents_config/version.conf \
+        | head -n1 | cut -d'"' -f2)
+    if [ -z "$conf_version" ]; then
+        echo "  could not parse POD_AGENTS_VERSION from version.conf" >&2
+        return 1
+    fi
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" --version 2>&1)
+    rm -rf "$sandbox"
+    reported_version=$(printf '%s\n' "$out" | awk '/^pod-agents-manager/ {print $2; exit}')
+    if [ "$reported_version" != "$conf_version" ]; then
+        echo "  version.conf says \"$conf_version\" but pod --version reported \"$reported_version\"" >&2
+        return 1
+    fi
+}
+
 # `pod doctor` should run end-to-end and print the standard output structure,
 # even when most checks FAIL on a developer machine (e.g. macOS without
 # podman/systemd). We assert structure, not pass/fail counts.
@@ -401,6 +423,7 @@ run_test "entrypoint: handles 99 sentinel"     t_entrypoint_handles_sentinel
 run_test "smoke: pod --help"                   t_pod_help_runs
 run_test "smoke: pod --help prints once"       t_pod_help_no_double_print
 run_test "smoke: pod --version"                t_pod_version_runs
+run_test "version: matches version.conf"       t_pod_version_matches_conf
 run_test "smoke: pod errors w/o lib/"          t_pod_errors_when_lib_missing
 run_test "smoke: pod doctor runs"              t_pod_doctor_runs
 run_test "smoke: pod doctor flags failures"    t_pod_doctor_reports_failures
