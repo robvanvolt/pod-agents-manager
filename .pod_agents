@@ -12,12 +12,19 @@ pod() {
 
     mkdir -p "$config_dir_root" "$config_dir_agents" "$config_dir_flavors" "$config_dir_skills" "$config_dir_volumes" "$config_dir_root/lib"
 
-    local _pod_lib _pod_lib_loaded=0
+    # Lib modules are sourced in numeric order. Each lib ends with the
+    # sentinel `return 99` to mean "fell off the end, continue to next lib".
+    # Any other exit status means the lib explicitly returned and we should
+    # propagate it as the result of pod() — this is needed because `return`
+    # from a sourced file only exits the source command, NOT the caller.
+    local _pod_lib _pod_lib_loaded=0 _pod_lib_rc=0
     shopt -s nullglob
     for _pod_lib in "$config_dir_root"/lib/*.sh; do
         _pod_lib_loaded=1
         # shellcheck disable=SC1090
         source "$_pod_lib"
+        _pod_lib_rc=$?
+        [ "$_pod_lib_rc" -ne 99 ] && { shopt -u nullglob; return "$_pod_lib_rc"; }
     done
     shopt -u nullglob
 
@@ -26,4 +33,4 @@ pod() {
         return 1
     fi
 }
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean uninstall quit help version --help --version -h -v" pod
+complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean doctor uninstall quit help version --help --version -h -v" pod

@@ -178,3 +178,5 @@
         echo -e "\033[32mDefault base image set to '${new_base}' (${BASE_IMAGE_FULL}).\033[0m"
         return 0
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

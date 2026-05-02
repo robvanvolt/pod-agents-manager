@@ -230,3 +230,5 @@
                 ;;
         esac
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

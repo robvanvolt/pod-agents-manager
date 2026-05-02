@@ -1,0 +1,27 @@
+name: tests
+
+# Lint + sham tests for the pod-agents-manager bash entrypoint and lib modules.
+# This workflow does NOT touch GitHub Pages — no deploy-pages action, no
+# gh-pages branch writes — so it cannot retrigger Pages builds.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Run test suite
+        run: bash tests/run.sh

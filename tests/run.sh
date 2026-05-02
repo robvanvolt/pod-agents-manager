@@ -160,6 +160,47 @@ run_pod_in_sandbox() {
     ' bash "$@"
 }
 
+# Regression: `return N` from a sourced lib only exits the source command,
+# not the loop in pod(). The entrypoint uses a `return 99` sentinel at the
+# end of every lib so it can distinguish "fell off the end → continue" from
+# "explicit early return → propagate". This test guards both halves.
+
+t_lib_sentinel_in_every_file() {
+    local f rc=0
+    for f in .pod_agents_config/lib/*.sh; do
+        if ! tail -1 "$f" | grep -qE '^[[:space:]]*return 99'; then
+            echo "  missing 'return 99' sentinel at end of $f" >&2
+            rc=1
+        fi
+    done
+    return "$rc"
+}
+
+t_entrypoint_handles_sentinel() {
+    grep -qE '_pod_lib_rc[[:space:]]*=\$\?' .pod_agents \
+        && grep -qE '\[[[:space:]]+"\$_pod_lib_rc"[[:space:]]+-ne[[:space:]]+99[[:space:]]+\]' .pod_agents
+}
+
+# `pod --help` previously printed help twice and fell through to lifecycle's
+# "Unknown action" message (because `return 0` from the sourced lib didn't
+# exit pod()). After the sentinel fix it should print the help exactly once.
+t_pod_help_no_double_print() {
+    local sandbox out unknown_count usage_count
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" --help 2>&1)
+    rm -rf "$sandbox"
+    unknown_count=$(printf '%s\n' "$out" | grep -c 'Unknown action' || true)
+    usage_count=$(printf '%s\n' "$out" | grep -c '^Usage:$' || true)
+    if [ "$unknown_count" -ne 0 ]; then
+        echo "  pod --help fell through to 'Unknown action' ($unknown_count occurrences)" >&2
+        return 1
+    fi
+    if [ "$usage_count" -ne 1 ]; then
+        echo "  pod --help printed Usage line $usage_count times (expected 1)" >&2
+        return 1
+    fi
+}
+
 t_pod_help_runs() {
     local sandbox out rc
     sandbox=$(setup_sandbox)
@@ -194,6 +235,55 @@ t_pod_version_runs() {
         return 1
     fi
     printf '%s' "$out" | grep -qE '^pod-agents-manager [0-9]+\.[0-9]+\.[0-9]+'
+}
+
+# `pod doctor` should run end-to-end and print the standard output structure,
+# even when most checks FAIL on a developer machine (e.g. macOS without
+# podman/systemd). We assert structure, not pass/fail counts.
+t_pod_doctor_runs() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    # rc may be 1 if podman/systemd are absent — that's expected.
+    # We only require that doctor produced its banner and a Summary line,
+    # which proves it ran every section without crashing.
+    if ! printf '%s' "$out" | grep -q 'pod-agents-manager doctor'; then
+        echo "  doctor banner missing" >&2
+        echo "$out" | sed 's/^/    /' >&2
+        return 1
+    fi
+    if ! printf '%s' "$out" | grep -q 'Summary:'; then
+        echo "  doctor summary line missing — check probably crashed mid-run" >&2
+        echo "$out" | sed 's/^/    /' >&2
+        return 1
+    fi
+    return 0
+}
+
+# A doctor run on a known-broken sandbox (no lib/) must report at least one
+# FAIL and exit non-zero. Guards against silently turning every check into
+# WARN by accident.
+t_pod_doctor_reports_failures() {
+    # We can't easily strip lib/ here because doctor itself lives in lib/.
+    # Instead, point doctor at a config root with no agents — that turns the
+    # agents check into a WARN. To trigger a hard FAIL, we delete podman from
+    # PATH for this run (already absent on macOS) and assert FAIL > 0.
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(HOME="$sandbox" PATH="/usr/bin:/bin" bash --noprofile --norc -c '
+        set -u
+        tmp_entry=$(mktemp)
+        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
+        # shellcheck disable=SC1090
+        source "$tmp_entry"
+        rm -f "$tmp_entry"
+        pod doctor
+    ' 2>&1)
+    rm -rf "$sandbox"
+    # Expect at least one [FAIL] line in the output.
+    printf '%s' "$out" | grep -q '\[FAIL\]'
 }
 
 # Missing lib dir should produce a clear diagnostic and non-zero return.
@@ -306,9 +396,14 @@ run_test "self-update syncs lib/"              t_self_update_copies_lib
 run_test "self-update seeds .env from example" t_self_update_seeds_env_from_example
 run_test "entrypoint sources lib glob"         t_entrypoint_sources_lib_glob
 
+run_test "lib: 'return 99' sentinel present"   t_lib_sentinel_in_every_file
+run_test "entrypoint: handles 99 sentinel"     t_entrypoint_handles_sentinel
 run_test "smoke: pod --help"                   t_pod_help_runs
+run_test "smoke: pod --help prints once"       t_pod_help_no_double_print
 run_test "smoke: pod --version"                t_pod_version_runs
 run_test "smoke: pod errors w/o lib/"          t_pod_errors_when_lib_missing
+run_test "smoke: pod doctor runs"              t_pod_doctor_runs
+run_test "smoke: pod doctor flags failures"    t_pod_doctor_reports_failures
 run_test "unit: inner helper functions"        t_helpers_unit
 
 echo

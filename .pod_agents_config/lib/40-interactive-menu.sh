@@ -1,5 +1,5 @@
     if [ "$#" -eq 0 ]; then
-        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "server" "base" "cache-clean" "uninstall" "quit")
+        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "server" "base" "cache-clean" "doctor" "uninstall" "quit")
         local selected_action=""
         
         while true; do
@@ -22,6 +22,7 @@
         case $selected_action in
             quit) echo "Exiting."; return 0 ;;
             cache-clean) pod cache-clean; return $? ;;
+            doctor) pod doctor; return $? ;;
             remove-all) pod remove --all; return $? ;;
             delete-all) pod delete --all; return $? ;;
             self-update) pod self-update; return $? ;;
@@ -172,3 +173,5 @@
         esac
         return 0
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

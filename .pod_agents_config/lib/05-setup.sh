@@ -26,3 +26,5 @@
     if [ -z "$(ls -A "$config_dir_flavors" 2>/dev/null)" ]; then
         echo "# Base node image only; no extra flavors added." > "$config_dir_flavors/none.containerfile"
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

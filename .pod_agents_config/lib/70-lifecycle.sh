@@ -396,3 +396,5 @@ EOF
             return 1
             ;;
     esac
+
+    return 99  # sentinel: fell off end, continue to next lib

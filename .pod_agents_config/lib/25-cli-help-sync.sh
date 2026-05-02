@@ -24,10 +24,12 @@ Actions:
   images       prebuild update self-update cache-clean base
   batch        batch [log [id]|tmux|stats|list|stop <id>|...]
   server       server {start|stop|restart|status|logs|build}
+  diagnostics  doctor
   uninstall    uninstall
 
 Examples:
   pod config
+  pod doctor
   pod self-update
   pod start pi dev all all alpine
   pod join pi dev
@@ -88,3 +90,5 @@ EOF
         _pod_merge_tree "$src_root/.pod_agents_config/server" "$config_dir_root/server"
         rm -f "$config_dir_root/server/static/favicon.ico"
     }
+
+    return 99  # sentinel: fell off end, continue to next lib

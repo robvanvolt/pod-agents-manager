@@ -217,10 +217,12 @@ EOF
     local initial_action="${1:-}"
     local should_auto_config=1
     case "$initial_action" in
-        config|-h|--help|help|-v|--version|version)
+        config|-h|--help|help|-v|--version|version|doctor)
             should_auto_config=0
             ;;
     esac
     if [ "$should_auto_config" -eq 1 ] && [ -r /dev/tty ] && [ -w /dev/tty ] && _pod_has_missing_env; then
         _pod_configure_env "missing" || return 1
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

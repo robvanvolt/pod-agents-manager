@@ -522,3 +522,5 @@ RUNNER
         echo -e "  Stop:     \033[36mpod batch stop $batch_id\033[0m"
         return 0
     fi
+
+    return 99  # sentinel: fell off end, continue to next lib

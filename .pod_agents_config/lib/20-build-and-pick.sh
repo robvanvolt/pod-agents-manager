@@ -149,3 +149,5 @@ set -g focus-events on
 EOF
         echo "COPY tmux.conf /etc/tmux.conf" >> "$build_dir/Containerfile"
     }
+
+    return 99  # sentinel: fell off end, continue to next lib
