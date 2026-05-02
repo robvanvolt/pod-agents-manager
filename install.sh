@@ -57,6 +57,7 @@ merge_tree "$src_root/.pod_agents_config/agents" "$CONFIG_ROOT/agents"
 merge_tree "$src_root/.pod_agents_config/flavors" "$CONFIG_ROOT/flavors"
 merge_tree "$src_root/.pod_agents_config/volumes" "$CONFIG_ROOT/volumes"
 merge_tree "$src_root/.pod_agents_config/skills" "$CONFIG_ROOT/skills"
+merge_tree "$src_root/.pod_agents_config/lib" "$CONFIG_ROOT/lib"
 merge_tree "$src_root/.pod_agents_config/server" "$CONFIG_ROOT/server"
 rm -f "$CONFIG_ROOT/server/static/favicon.ico"
 

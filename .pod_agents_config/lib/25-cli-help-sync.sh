@@ -77,7 +77,7 @@ EOF
 
         mkdir -p "$config_dir_root"
         cp "$src_root/.pod_agents" "$HOME/.pod_agents"
-        [ -f "$config_dir_root/.env" ] || cp "$src_root/.pod_agents_config/.env" "$config_dir_root/.env"
+        [ -f "$config_dir_root/.env" ] || cp "$src_root/.pod_agents_config/.env.example" "$config_dir_root/.env"
         cp "$src_root/.pod_agents_config/.env.example" "$config_dir_root/.env.example"
         cp "$src_root/.pod_agents_config/version.conf" "$config_dir_root/version.conf"
         _pod_merge_tree "$src_root/.pod_agents_config/agents" "$config_dir_agents"
