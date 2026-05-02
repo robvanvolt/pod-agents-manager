@@ -46,7 +46,6 @@ t_syntax_libs() {
 }
 
 t_syntax_install() { bash -n install.sh; }
-t_syntax_copy()    { bash -n copy.sh; }
 
 # ----- 2. Shellcheck --------------------------------------------------------
 # SC2168 ('local' is only valid in functions) is a known false-positive for
@@ -284,28 +283,25 @@ t_pod_doctor_runs() {
     return 0
 }
 
-# A doctor run on a known-broken sandbox (no lib/) must report at least one
-# FAIL and exit non-zero. Guards against silently turning every check into
-# WARN by accident.
-t_pod_doctor_reports_failures() {
-    # We can't easily strip lib/ here because doctor itself lives in lib/.
-    # Instead, point doctor at a config root with no agents — that turns the
-    # agents check into a WARN. To trigger a hard FAIL, we delete podman from
-    # PATH for this run (already absent on macOS) and assert FAIL > 0.
-    local sandbox out
+# Doctor's contract: exit 0 iff there are zero [FAIL] lines in its output,
+# non-zero otherwise. This is environment-independent — works on macOS (where
+# podman/systemctl are missing → FAILs) and on CI runners (where they may be
+# present → no FAILs). Either way the contract must hold.
+t_pod_doctor_exit_matches_fail_count() {
+    local sandbox out rc fail_count
     sandbox=$(setup_sandbox)
-    out=$(HOME="$sandbox" PATH="/usr/bin:/bin" bash --noprofile --norc -c '
-        set -u
-        tmp_entry=$(mktemp)
-        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
-        # shellcheck disable=SC1090
-        source "$tmp_entry"
-        rm -f "$tmp_entry"
-        pod doctor
-    ' 2>&1)
+    out=$(run_pod_in_sandbox "$sandbox" doctor 2>&1)
+    rc=$?
     rm -rf "$sandbox"
-    # Expect at least one [FAIL] line in the output.
-    printf '%s' "$out" | grep -q '\[FAIL\]'
+    fail_count=$(printf '%s\n' "$out" | grep -c '\[FAIL\]' || true)
+    if [ "$fail_count" -eq 0 ] && [ "$rc" -ne 0 ]; then
+        echo "  doctor reported 0 fails but exited $rc" >&2
+        return 1
+    fi
+    if [ "$fail_count" -gt 0 ] && [ "$rc" -eq 0 ]; then
+        echo "  doctor reported $fail_count fail(s) but exited 0" >&2
+        return 1
+    fi
 }
 
 # Missing lib dir should produce a clear diagnostic and non-zero return.
@@ -400,7 +396,6 @@ echo
 run_test "syntax: .pod_agents"                 t_syntax_entrypoint
 run_test "syntax: lib/*.sh"                    t_syntax_libs
 run_test "syntax: install.sh"                  t_syntax_install
-run_test "syntax: copy.sh"                     t_syntax_copy
 
 if t_shellcheck_available; then
     run_test "shellcheck: .pod_agents"         t_shellcheck_entrypoint
@@ -426,7 +421,7 @@ run_test "smoke: pod --version"                t_pod_version_runs
 run_test "version: matches version.conf"       t_pod_version_matches_conf
 run_test "smoke: pod errors w/o lib/"          t_pod_errors_when_lib_missing
 run_test "smoke: pod doctor runs"              t_pod_doctor_runs
-run_test "smoke: pod doctor flags failures"    t_pod_doctor_reports_failures
+run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_count
 run_test "unit: inner helper functions"        t_helpers_unit
 
 echo
