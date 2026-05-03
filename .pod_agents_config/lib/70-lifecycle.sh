@@ -1,3 +1,25 @@
+    # ------------------------------------------------------------------------
+    # Make host-written agent config files reachable from inside the container.
+    #
+    # Every agent uses the `cat > /tmp/file && mv -f /tmp/file <config_dir>/...`
+    # pattern. The `mv` crosses filesystems (tmpfs → ext4/btrfs/etc.) which is
+    # implemented as copy-then-unlink, and the new file inherits permissions
+    # from the host user's umask. Hosts that ship a strict umask (077) end up
+    # with mode-600 config files; in some podman/SELinux combos the container's
+    # mapped root cannot then read them, producing the EACCES we see at agent
+    # startup ("Failed to load models.json: EACCES").
+    #
+    # Forcing world-readable (a+r) on files and search/exec (a+X) on dirs costs
+    # nothing on a per-pod sandbox dir and removes the entire class of issue,
+    # while keeping default-rootless UID mapping (no UserNS=keep-id, which would
+    # break access to /root/<dir> in agent images).
+    # ------------------------------------------------------------------------
+    _pod_normalize_config_perms() {
+        local _cfg="$1"
+        [ -d "$_cfg" ] || return 0
+        chmod -R a+rX "$_cfg" 2>/dev/null || true
+    }
+
     remove_all_managed_pods() {
         local wipe_workspace_data="$1" # true for delete, false for remove
         local action_label="remove"
@@ -138,8 +160,8 @@ Description=${agent^} Agent Sandbox (%i)
 Image=${image_name}
 Pull=never
 ContainerName=${agent}-%i
-Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/workspace:/workspace:Z
-Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z
+Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/workspace:/workspace:Z,U
+Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z,U
 Volume=%h/.pod_agents_config/skills:/srv/skills:ro,z
 ${dynamic_volumes}WorkingDir=/workspace
 Environment=OPENAI_BASE_URL=${OPENAI_BASE_URL}
@@ -366,6 +388,7 @@ EOF
             rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
 
             agent_generate_config "$config_dir" "$action"
+            _pod_normalize_config_perms "$config_dir"
 
             local skills_subpath="${AGENT_SKILLS_SUBPATH:-skills}"
             mkdir -p "$config_dir/$(dirname "$skills_subpath")" 2>/dev/null || true
@@ -394,15 +417,22 @@ EOF
                 [ -n "${API_KEY_OVERRIDE:-}" ] && override_bits+=("--api_key=<hidden>")
                 echo -e "\033[36mApplying overrides (${override_bits[*]}) to ${container_name} (regenerating agent config)...\033[0m"
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
-                agent_generate_config "$config_dir" "update"
-                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches config aggressively, run \`pod restart $agent $instance\` with the same override flags.\033[0m"
+                # Pass "restart" — every shipped agent treats "update" as
+                # "preserve existing config" and early-returns, so passing
+                # "update" here would delete the files without regenerating
+                # them and the agent would crash with EACCES/ENOENT.
+                agent_generate_config "$config_dir" "restart"
+                _pod_normalize_config_perms "$config_dir"
+                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches config aggressively, run \`${user_cmd_name:-pod} restart $agent $instance\` with the same override flags.\033[0m"
             fi
             podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
         it)
             if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
-                agent_generate_config "$config_dir" "update"
+                # See note above on join|enter — "update" is a no-op for every shipped agent.
+                agent_generate_config "$config_dir" "restart"
+                _pod_normalize_config_perms "$config_dir"
             fi
             podman exec -it -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
             ;;
