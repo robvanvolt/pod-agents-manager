@@ -387,9 +387,17 @@ EOF
             fi
             ;;
         join|enter)
-            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
+            if [ -n "${MODEL_OVERRIDE:-}" ]; then
+                echo -e "\033[36mApplying --model=\033[1m${MODEL_OVERRIDE}\033[0m\033[36m to ${container_name} (regenerating agent config)...\033[0m"
+                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+                agent_generate_config "$config_dir" "update"
+                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches the model, run \`pod restart $agent $instance --model $MODEL_OVERRIDE\`.\033[0m"
+            fi
+            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
-        it) podman exec -it "$container_name" bash ;;
+        it)
+            podman exec -it -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
+            ;;
         *)
             echo "Unknown action: $action"
             _pod_print_help

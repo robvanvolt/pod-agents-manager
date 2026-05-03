@@ -16,7 +16,7 @@ pod-agents-manager ${POD_AGENTS_VERSION}
 Usage:
   pod [--help|-h]
   pod [--version|-v]
-  pod <action> [agent] [instance] [flavor] [volumes] [base]
+  pod <action> [agent] [instance] [flavor] [volumes] [base] [--model NAME]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -32,6 +32,7 @@ Examples:
   pod doctor
   pod self-update
   pod start pi dev all all alpine
+  pod start pi dev --model my-other-model
   pod join pi dev
   pod batch prompts.txt --concurrent
   pod batch log

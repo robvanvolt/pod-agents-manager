@@ -10,6 +10,15 @@
     [ "$flavor" = "standard" ] && flavor="all"
     [ "$volumes" = "standard" ] && volumes="all"
 
+    # Apply --model override (extracted in 30-early-flags). DEFAULT_MODEL is
+    # rewritten by 10-env on every pod() call, so this is a per-invocation
+    # override, never persisted to .env.
+    if [ -n "${MODEL_OVERRIDE:-}" ]; then
+        DEFAULT_MODEL="$MODEL_OVERRIDE"
+        POD_DEFAULT_MODEL="$MODEL_OVERRIDE"
+        echo -e "\033[36mUsing model override: \033[1m${MODEL_OVERRIDE}\033[0m"
+    fi
+
     _resolve_base_image "$base_in"
     
     if [ "$action" = "cache-clean" ]; then
@@ -106,7 +115,58 @@
         [ "$uninstall_level" = "3" ] && confirm_msg="Remove EVERYTHING including all pod volumes (DESTRUCTIVE)"
         _pod_prompt_yes_no "$confirm_msg — are you sure?" "N" || { echo "Cancelled."; return 0; }
 
-        # Level 1: manager script + shell rc source line
+        # Level 1: stop the dashboard, then remove the manager script and rc line.
+        # The dashboard is a native host process (not a container), so removing
+        # files alone leaves it bound to the port until reboot.
+        local _srv_dir="$config_dir_root/server"
+        local _srv_bin="$_srv_dir/server"
+        local _srv_pid_file="$_srv_dir/server.pid"
+        local _srv_port="${POD_SERVER_PORT:-1337}"
+        local _killed_anything=0
+        _pod_uninstall_kill() {
+            local _p="$1"
+            [ -z "$_p" ] && return 0
+            kill "$_p" 2>/dev/null || return 0
+            for _ in 1 2 3 4 5 6 7 8; do
+                kill -0 "$_p" 2>/dev/null || return 0
+                sleep 0.2
+            done
+            kill -9 "$_p" 2>/dev/null || true
+        }
+        if [ -f "$_srv_pid_file" ]; then
+            local _spid; _spid=$(cat "$_srv_pid_file" 2>/dev/null)
+            if [ -n "$_spid" ] && kill -0 "$_spid" 2>/dev/null; then
+                echo -e "\033[33mStopping dashboard (pid $_spid)...\033[0m"
+                _pod_uninstall_kill "$_spid"
+                _killed_anything=1
+            fi
+            rm -f "$_srv_pid_file"
+        fi
+        # Sweep any orphan dashboard processes (pid file may have drifted).
+        if [ -x "$_srv_bin" ]; then
+            local _orphan
+            while IFS= read -r _orphan; do
+                [ -z "$_orphan" ] && continue
+                echo -e "\033[33mKilling orphan dashboard process $_orphan...\033[0m"
+                _pod_uninstall_kill "$_orphan"
+                _killed_anything=1
+            done < <(pgrep -f "^${_srv_bin}( |$)" 2>/dev/null)
+        fi
+        # Last resort: anything still holding the dashboard port.
+        local _holder=""
+        if command -v ss >/dev/null 2>&1; then
+            _holder=$(ss -ltnp "sport = :${_srv_port}" 2>/dev/null \
+                | awk -F 'pid=' 'NF>1 {print $2}' | awk -F ',' '{print $1}' | head -n 1)
+        elif command -v lsof >/dev/null 2>&1; then
+            _holder=$(lsof -nP -iTCP:"${_srv_port}" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $2; exit}')
+        fi
+        if [ -n "$_holder" ]; then
+            echo -e "\033[33mPort $_srv_port still held by pid $_holder; killing.\033[0m"
+            _pod_uninstall_kill "$_holder"
+            _killed_anything=1
+        fi
+        [ "$_killed_anything" = "1" ] && echo -e "\033[32mDashboard stopped.\033[0m"
+
         echo -e "\033[33mRemoving ~/.pod_agents...\033[0m"
         rm -f "$HOME/.pod_agents"
         local _source_line='[ -f "$HOME/.pod_agents" ] && source "$HOME/.pod_agents"'

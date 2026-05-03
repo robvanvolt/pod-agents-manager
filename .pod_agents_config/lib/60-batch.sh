@@ -2,6 +2,75 @@
         local batch_root="$config_dir_root/batch"
         mkdir -p "$batch_root"
 
+        # A batch is "active" if no .stop sentinel was written AND at least one
+        # of its runner pids is still alive. Old completed or cancelled batches
+        # are filtered out by default to keep `list` / `stats` / `tmux` focused
+        # on what's actually running. Pass --all to override.
+        _pod_batch_is_active() {
+            local d="$1"
+            [ -d "$d" ] || return 1
+            [ -f "$d/.stop" ] && return 1
+            local _pf _p _alive=0
+            for _pf in "$d"/runner-*.pid; do
+                [ -f "$_pf" ] || continue
+                _p=$(cat "$_pf" 2>/dev/null)
+                if [ -n "$_p" ] && kill -0 "$_p" 2>/dev/null; then
+                    _alive=1; break
+                fi
+            done
+            [ "$_alive" -eq 1 ]
+        }
+
+        # Compute and print one summary line per batch with totals + ETA based
+        # on observed throughput so far.
+        _pod_batch_summary_line() {
+            local d="$1"
+            local started_epoch=""
+            [ -f "$d/meta.conf" ] && started_epoch=$(grep '^started_epoch=' "$d/meta.conf" | head -n1 | cut -d= -f2-)
+            # Backward-compat: derive from file mtime when older meta.conf has no epoch.
+            if [ -z "$started_epoch" ] && [ -f "$d/meta.conf" ]; then
+                started_epoch=$(stat -c %Y "$d/meta.conf" 2>/dev/null || stat -f %m "$d/meta.conf" 2>/dev/null || echo "")
+            fi
+            local sum_cur=0 sum_total=0
+            local _pf _raw _c _t
+            for _pf in "$d/progress/"*.prog; do
+                [ -f "$_pf" ] || continue
+                _raw=$(cat "$_pf" 2>/dev/null)
+                _c="${_raw%%/*}"
+                _t="${_raw##*/}"
+                [[ "$_c" =~ ^[0-9]+$ ]] || _c=0
+                [[ "$_t" =~ ^[0-9]+$ ]] || _t=0
+                sum_cur=$((sum_cur + _c))
+                sum_total=$((sum_total + _t))
+            done
+            local now elapsed eta_str=""
+            now=$(date +%s 2>/dev/null)
+            if [ -n "$started_epoch" ] && [[ "$started_epoch" =~ ^[0-9]+$ ]] && [ "$sum_cur" -gt 0 ]; then
+                elapsed=$((now - started_epoch))
+                if [ "$elapsed" -gt 0 ] && [ "$sum_total" -gt "$sum_cur" ]; then
+                    # eta_seconds = (remaining * elapsed) / done
+                    local remaining=$((sum_total - sum_cur))
+                    local eta=$(( remaining * elapsed / sum_cur ))
+                    eta_str=$(_pod_batch_format_duration "$eta")
+                fi
+            fi
+            local line="  → ${sum_cur}/${sum_total} prompts"
+            [ -n "$eta_str" ] && line="$line  ·  ETA ${eta_str}"
+            printf '\033[2m%s\033[0m\n' "$line"
+        }
+
+        _pod_batch_format_duration() {
+            local s="${1:-0}"
+            [ "$s" -lt 0 ] && s=0
+            local h=$((s / 3600))
+            local m=$(( (s % 3600) / 60 ))
+            local r=$((s % 60))
+            if [ "$h" -gt 0 ]; then printf '%dh %dm' "$h" "$m"
+            elif [ "$m" -gt 0 ]; then printf '%dm %ds' "$m" "$r"
+            else printf '%ds' "$r"
+            fi
+        }
+
         _pod_batch_progress_line() {
             local prog_file="$1"
             [ -f "$prog_file" ] || return 1
@@ -25,11 +94,19 @@
         }
 
         local sub="${2:-}"
+        # Honor `--all` anywhere after the subcommand to include cancelled /
+        # completed batches in `list`, `stats`, and `tmux`.
+        local _show_all=0
+        local _arg_scan
+        for _arg_scan in "${@:3}"; do
+            [ "$_arg_scan" = "--all" ] && _show_all=1
+        done
         case "$sub" in
             tmux)
                 local panes=()
                 for d in "$batch_root"/*/; do
                     [ -d "$d" ] || continue
+                    [ "$_show_all" -eq 1 ] || _pod_batch_is_active "$d" || continue
                     local bid; bid=$(basename "$d")
                     for prog_file in "$d/progress/"*.prog; do
                         [ -f "$prog_file" ] || continue
@@ -123,6 +200,7 @@
                 local found=0
                 for d in "$batch_root"/*/; do
                     [ -d "$d" ] || continue
+                    [ "$_show_all" -eq 1 ] || _pod_batch_is_active "$d" || continue
                     local bid; bid=$(basename "$d")
                     [ -d "$d/progress" ] || continue
                     local first=1
@@ -135,18 +213,32 @@
                         _pod_batch_progress_line "$prog_file"
                         found=1
                     done
+                    [ "$first" -eq 0 ] && _pod_batch_summary_line "$d"
                 done
-                [ "$found" = "0" ] && echo -e "\033[33mNo batches found.\033[0m"
+                if [ "$found" = "0" ]; then
+                    if [ "$_show_all" -eq 1 ]; then
+                        echo -e "\033[33mNo batches found.\033[0m"
+                    else
+                        echo -e "\033[33mNo active batches.\033[0m  (use \`pod batch stats --all\` to include cancelled/completed)"
+                    fi
+                fi
                 return 0
                 ;;
             list)
                 local any=0
                 for d in "$batch_root"/*/; do
                     [ -d "$d" ] || continue
+                    [ "$_show_all" -eq 1 ] || _pod_batch_is_active "$d" || continue
                     any=1
                     basename "$d"
                 done
-                [ "$any" = "0" ] && echo -e "\033[33mNo batches found.\033[0m"
+                if [ "$any" = "0" ]; then
+                    if [ "$_show_all" -eq 1 ]; then
+                        echo -e "\033[33mNo batches found.\033[0m"
+                    else
+                        echo -e "\033[33mNo active batches.\033[0m  (use \`pod batch list --all\` to include cancelled/completed)"
+                    fi
+                fi
                 return 0
                 ;;
             stop)
@@ -286,6 +378,7 @@ PYJSON
         {
             echo "batch_id=$batch_id"
             echo "started=$(date -Iseconds 2>/dev/null || date)"
+            echo "started_epoch=$(date +%s)"
             echo "concurrent=$concurrent"
             echo "total=$total"
             echo "targets=${targets[*]}"

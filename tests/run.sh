@@ -287,6 +287,41 @@ t_pod_doctor_runs() {
 # non-zero otherwise. This is environment-independent — works on macOS (where
 # podman/systemctl are missing → FAILs) and on CI runners (where they may be
 # present → no FAILs). Either way the contract must hold.
+# `--model VAL` and `--model=VAL` should be stripped from the positional args
+# in 30-early-flags so 50-arg-parse sees a clean contract. We can't run a real
+# `pod start` (no podman on dev machines), so we exercise parsing via doctor:
+# `pod doctor --model my-model` should still print the doctor banner instead
+# of failing with "--model requires a value" or being treated as an action.
+t_model_flag_parses() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --model my-test-model 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if ! printf '%s' "$out" | grep -q 'pod-agents-manager doctor'; then
+        echo "  --model VAL was not stripped before doctor ran (rc=$rc)" >&2
+        echo "$out" | head -5 | sed 's/^/    /' >&2
+        return 1
+    fi
+}
+
+t_model_flag_eq_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --model=my-test-model 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_model_flag_missing_value_errors() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --model 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-model requires a value'
+}
+
 t_pod_doctor_exit_matches_fail_count() {
     local sandbox out rc fail_count
     sandbox=$(setup_sandbox)
@@ -422,6 +457,9 @@ run_test "version: matches version.conf"       t_pod_version_matches_conf
 run_test "smoke: pod errors w/o lib/"          t_pod_errors_when_lib_missing
 run_test "smoke: pod doctor runs"              t_pod_doctor_runs
 run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_count
+run_test "model flag: --model VAL parses"      t_model_flag_parses
+run_test "model flag: --model=VAL parses"      t_model_flag_eq_form_parses
+run_test "model flag: missing value errors"    t_model_flag_missing_value_errors
 run_test "unit: inner helper functions"        t_helpers_unit
 
 echo

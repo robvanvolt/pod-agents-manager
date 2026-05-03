@@ -27,9 +27,15 @@ html {
   scroll-behavior: smooth;
 }
 
+html, body {
+  /* Safety net: stop any single wide element (long install command, table,
+     decorative grid background) from creating a horizontal scroll on phones. */
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 body {
   margin: 0;
-  min-width: 320px;
   background:
     radial-gradient(circle at 10% 0%, rgba(104, 225, 253, 0.16), transparent 34rem),
     radial-gradient(circle at 90% 8%, rgba(167, 139, 250, 0.18), transparent 32rem),
@@ -81,10 +87,25 @@ code {
 
 pre {
   margin: 0;
+  max-width: 100%;
   overflow-x: auto;
   color: #dceaff;
   font-size: 0.9rem;
   line-height: 1.7;
+}
+
+img, svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* On phones, let long shell commands soft-wrap so the page never scrolls
+   sideways just to show one curl line. */
+@media (max-width: 760px) {
+  pre, pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 }
 
 pre code {
@@ -314,21 +335,18 @@ p {
   color: var(--text);
 }
 
-.badges {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.6rem;
-  margin-top: 1.5rem;
+.hero-meta {
+  margin-top: 1.6rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+  letter-spacing: 0.005em;
+  line-height: 1.7;
 }
 
-.badges span {
-  border: 1px solid rgba(148, 163, 184, 0.16);
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.08);
-  padding: 0.35rem 0.65rem;
-  color: #cbd5e1;
-  font-size: 0.82rem;
+.hero-meta .dot {
+  display: inline-block;
+  margin: 0 0.3rem;
+  color: rgba(148, 163, 184, 0.55);
 }
 
 .hero-card,
