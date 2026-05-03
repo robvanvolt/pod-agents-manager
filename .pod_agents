@@ -61,5 +61,5 @@ if ! [[ "$_pod_user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
 fi
 
 eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean doctor uninstall quit help version --help --version --model --endpoint --api_key -h -v" "$_pod_user_cmd_name"
+complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean doctor uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey -h -v" "$_pod_user_cmd_name"
 unset _pod_user_cmd_name

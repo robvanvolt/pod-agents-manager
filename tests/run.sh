@@ -379,7 +379,36 @@ t_api_key_flag_missing_value_errors() {
     out=$(run_pod_in_sandbox "$sandbox" doctor --api_key 2>&1)
     rc=$?
     rm -rf "$sandbox"
-    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-api_key requires a value'
+    # Error message uses the canonical hyphenated form regardless of which
+    # spelling the user typed.
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-api-key requires a value'
+}
+
+# All three api-key spellings (--api-key / --api_key / --apikey) must parse to
+# the same override. We exercise via doctor (which doesn't actually use the
+# value but proves the flag was stripped from positional args).
+t_api_key_hyphen_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --api-key test-key 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_api_key_runtogether_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --apikey test-key 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_api_key_hyphen_eq_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --api-key=test-key 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
 }
 
 # When ~/.pod_agents_config/.cmd_name contains a custom name (e.g. "pods" for
@@ -562,9 +591,12 @@ run_test "model flag: missing value errors"    t_model_flag_missing_value_errors
 run_test "endpoint flag: --endpoint VAL parses"   t_endpoint_flag_parses
 run_test "endpoint flag: --endpoint=VAL parses"   t_endpoint_flag_eq_form_parses
 run_test "endpoint flag: missing value errors"    t_endpoint_flag_missing_value_errors
-run_test "api_key flag: --api_key VAL parses"     t_api_key_flag_parses
-run_test "api_key flag: --api_key=VAL parses"     t_api_key_flag_eq_form_parses
-run_test "api_key flag: missing value errors"     t_api_key_flag_missing_value_errors
+run_test "api-key flag: --api_key VAL parses"     t_api_key_flag_parses
+run_test "api-key flag: --api_key=VAL parses"     t_api_key_flag_eq_form_parses
+run_test "api-key flag: --api-key VAL parses"     t_api_key_hyphen_form_parses
+run_test "api-key flag: --apikey VAL parses"      t_api_key_runtogether_form_parses
+run_test "api-key flag: --api-key=VAL parses"     t_api_key_hyphen_eq_form_parses
+run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 

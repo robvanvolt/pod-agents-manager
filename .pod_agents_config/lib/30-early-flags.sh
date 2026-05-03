@@ -32,10 +32,13 @@
         case "$_mf_arg" in
             --model=*) MODEL_OVERRIDE="${_mf_arg#--model=}" ;;
             --endpoint=*) ENDPOINT_OVERRIDE="${_mf_arg#--endpoint=}" ;;
-            --api_key=*) API_KEY_OVERRIDE="${_mf_arg#--api_key=}" ;;
+            # All three spellings are accepted; --api-key is the canonical one
+            # shown in help text. Underscore and run-together forms are kept
+            # because users naturally type them.
+            --api-key=*|--api_key=*|--apikey=*) API_KEY_OVERRIDE="${_mf_arg#*=}" ;;
             --model)   _mf_skip=1; _mf_expect="model" ;;
             --endpoint) _mf_skip=1; _mf_expect="endpoint" ;;
-            --api_key) _mf_skip=1; _mf_expect="api_key" ;;
+            --api-key|--api_key|--apikey) _mf_skip=1; _mf_expect="api_key" ;;
             *)         _mf_args+=("$_mf_arg") ;;
         esac
     done
@@ -48,7 +51,7 @@
                 echo -e "\033[31m--endpoint requires a value (e.g. --endpoint http://127.0.0.1:8000/v1 or --endpoint=http://127.0.0.1:8000/v1).\033[0m" >&2
                 ;;
             api_key)
-                echo -e "\033[31m--api_key requires a value (e.g. --api_key sk-... or --api_key=sk-...).\033[0m" >&2
+                echo -e "\033[31m--api-key requires a value (e.g. --api-key sk-... or --api-key=sk-...).\033[0m" >&2
                 ;;
         esac
         return 1

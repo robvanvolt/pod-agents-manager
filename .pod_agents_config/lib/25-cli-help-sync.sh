@@ -17,7 +17,8 @@ pod-agents-manager ${POD_AGENTS_VERSION}
 Usage:
   ${_cmd} [--help|-h]
   ${_cmd} [--version|-v]
-  ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base] [--model NAME] [--endpoint URL] [--api_key KEY]
+  ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base]
+            [--model NAME] [--endpoint URL] [--api-key KEY]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -34,6 +35,7 @@ Examples:
   ${_cmd} self-update
   ${_cmd} start pi dev all all alpine
   ${_cmd} start pi dev --model my-other-model
+  ${_cmd} enter pi dev --endpoint http://192.168.1.10:8000/v1 --api-key sk-...
   ${_cmd} start pi dev --endpoint http://127.0.0.1:8000/v1 --api_key sk-local
   ${_cmd} join pi dev
   ${_cmd} batch prompts.txt --concurrent
