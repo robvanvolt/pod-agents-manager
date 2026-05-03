@@ -387,16 +387,24 @@ EOF
             fi
             ;;
         join|enter)
-            if [ -n "${MODEL_OVERRIDE:-}" ]; then
-                echo -e "\033[36mApplying --model=\033[1m${MODEL_OVERRIDE}\033[0m\033[36m to ${container_name} (regenerating agent config)...\033[0m"
+            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
+                local override_bits=()
+                [ -n "${MODEL_OVERRIDE:-}" ] && override_bits+=("--model=${MODEL_OVERRIDE}")
+                [ -n "${ENDPOINT_OVERRIDE:-}" ] && override_bits+=("--endpoint=${ENDPOINT_OVERRIDE}")
+                [ -n "${API_KEY_OVERRIDE:-}" ] && override_bits+=("--api_key=<hidden>")
+                echo -e "\033[36mApplying overrides (${override_bits[*]}) to ${container_name} (regenerating agent config)...\033[0m"
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
                 agent_generate_config "$config_dir" "update"
-                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches the model, run \`pod restart $agent $instance --model $MODEL_OVERRIDE\`.\033[0m"
+                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches config aggressively, run \`pod restart $agent $instance\` with the same override flags.\033[0m"
             fi
-            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
+            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
         it)
-            podman exec -it -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
+            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
+                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+                agent_generate_config "$config_dir" "update"
+            fi
+            podman exec -it -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
             ;;
         *)
             echo "Unknown action: $action"

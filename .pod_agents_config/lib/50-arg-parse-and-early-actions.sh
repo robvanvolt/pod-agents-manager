@@ -18,6 +18,16 @@
         POD_DEFAULT_MODEL="$MODEL_OVERRIDE"
         echo -e "\033[36mUsing model override: \033[1m${MODEL_OVERRIDE}\033[0m"
     fi
+    if [ -n "${ENDPOINT_OVERRIDE:-}" ]; then
+        OPENAI_BASE_URL="$ENDPOINT_OVERRIDE"
+        POD_OPENAI_BASE_URL="$ENDPOINT_OVERRIDE"
+        echo -e "\033[36mUsing endpoint override: \033[1m${ENDPOINT_OVERRIDE}\033[0m"
+    fi
+    if [ -n "${API_KEY_OVERRIDE:-}" ]; then
+        OPENAI_API_KEY="$API_KEY_OVERRIDE"
+        POD_OPENAI_API_KEY="$API_KEY_OVERRIDE"
+        echo -e "\033[36mUsing api_key override.\033[0m"
+    fi
 
     _resolve_base_image "$base_in"
     

@@ -322,6 +322,66 @@ t_model_flag_missing_value_errors() {
     [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-model requires a value'
 }
 
+t_endpoint_flag_parses() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --endpoint http://127.0.0.1:8000/v1 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if ! printf '%s' "$out" | grep -q 'pod-agents-manager doctor'; then
+        echo "  --endpoint VAL was not stripped before doctor ran (rc=$rc)" >&2
+        echo "$out" | head -5 | sed 's/^/    /' >&2
+        return 1
+    fi
+}
+
+t_endpoint_flag_eq_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --endpoint=http://127.0.0.1:8000/v1 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_endpoint_flag_missing_value_errors() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --endpoint 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-endpoint requires a value'
+}
+
+t_api_key_flag_parses() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --api_key test-key 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if ! printf '%s' "$out" | grep -q 'pod-agents-manager doctor'; then
+        echo "  --api_key VAL was not stripped before doctor ran (rc=$rc)" >&2
+        echo "$out" | head -5 | sed 's/^/    /' >&2
+        return 1
+    fi
+}
+
+t_api_key_flag_eq_form_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --api_key=test-key 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_api_key_flag_missing_value_errors() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --api_key 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-api_key requires a value'
+}
+
 # When ~/.pod_agents_config/.cmd_name contains a custom name (e.g. "pods" for
 # hosts that already have CocoaPods at /usr/bin/pod), the entrypoint must
 # define the user-facing function under THAT name and the help text should
@@ -499,6 +559,12 @@ run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_
 run_test "model flag: --model VAL parses"      t_model_flag_parses
 run_test "model flag: --model=VAL parses"      t_model_flag_eq_form_parses
 run_test "model flag: missing value errors"    t_model_flag_missing_value_errors
+run_test "endpoint flag: --endpoint VAL parses"   t_endpoint_flag_parses
+run_test "endpoint flag: --endpoint=VAL parses"   t_endpoint_flag_eq_form_parses
+run_test "endpoint flag: missing value errors"    t_endpoint_flag_missing_value_errors
+run_test "api_key flag: --api_key VAL parses"     t_api_key_flag_parses
+run_test "api_key flag: --api_key=VAL parses"     t_api_key_flag_eq_form_parses
+run_test "api_key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 
