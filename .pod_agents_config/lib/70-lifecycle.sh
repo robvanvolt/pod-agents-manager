@@ -15,9 +15,30 @@
     # break access to /root/<dir> in agent images).
     # ------------------------------------------------------------------------
     _pod_normalize_config_perms() {
-        local _cfg="$1"
+        local _cfg="$1"           # host path, e.g. ~/Developer/pi-pods/dev/config
+        local _container="${2:-}" # optional container name; when set + running,
+                                  # we also normalize from INSIDE the container
+        local _mount="${3:-}"     # mount point inside container (AGENT_VOLUME_CONFIG_PATH)
         [ -d "$_cfg" ] || return 0
-        chmod -R a+rX "$_cfg" 2>/dev/null || true
+
+        # Host-side: world-readable + writable so the container's UID-mapped
+        # view can always access them. On a per-pod sandbox dir this is
+        # equivalent to "the host user owns it" anyway.
+        chmod -R a+rwX "$_cfg" 2>/dev/null || true
+
+        # Container-side: handles the case where pi/claude/etc. created files
+        # earlier as a non-zero in-container UID, which on the host map to a
+        # subuid the host user can NOT chmod or overwrite. Inside the container,
+        # root has full DAC and can chmod regardless of host ownership.
+        if [ -n "$_container" ] && [ -n "$_mount" ] \
+           && podman ps --format '{{.Names}}' 2>/dev/null | grep -qFx "$_container"; then
+            podman exec --user 0:0 "$_container" sh -c "
+                if [ -d '$_mount' ]; then
+                    find '$_mount' -type d -exec chmod 0777 {} + 2>/dev/null
+                    find '$_mount' -type f -exec chmod 0666 {} + 2>/dev/null
+                fi
+            " 2>/dev/null || true
+        fi
     }
 
     remove_all_managed_pods() {
@@ -388,7 +409,7 @@ EOF
             rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
 
             agent_generate_config "$config_dir" "$action"
-            _pod_normalize_config_perms "$config_dir"
+            _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
 
             local skills_subpath="${AGENT_SKILLS_SUBPATH:-skills}"
             mkdir -p "$config_dir/$(dirname "$skills_subpath")" 2>/dev/null || true
@@ -416,23 +437,33 @@ EOF
                 [ -n "${ENDPOINT_OVERRIDE:-}" ] && override_bits+=("--endpoint=${ENDPOINT_OVERRIDE}")
                 [ -n "${API_KEY_OVERRIDE:-}" ] && override_bits+=("--api_key=<hidden>")
                 echo -e "\033[36mApplying overrides (${override_bits[*]}) to ${container_name} (regenerating agent config)...\033[0m"
+                # PRE-normalize: chmod the bind-mount dirs to 0777 from inside
+                # the container so the host CAN rm/mv into them even if pi
+                # created sub-files earlier as an in-container non-zero UID
+                # (which on the host land in the subuid range and are otherwise
+                # untouchable for the host user).
+                _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
                 # Pass "restart" — every shipped agent treats "update" as
                 # "preserve existing config" and early-returns, so passing
                 # "update" here would delete the files without regenerating
                 # them and the agent would crash with EACCES/ENOENT.
                 agent_generate_config "$config_dir" "restart"
-                _pod_normalize_config_perms "$config_dir"
+                # POST-normalize: ensure the newly-written files are accessible
+                # to whatever UID the agent actually runs as inside the container.
+                _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
                 echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches config aggressively, run \`${user_cmd_name:-pod} restart $agent $instance\` with the same override flags.\033[0m"
             fi
             podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
         it)
             if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
+                # See note on join|enter for the pre/post-normalize sandwich.
+                _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
                 # See note above on join|enter — "update" is a no-op for every shipped agent.
                 agent_generate_config "$config_dir" "restart"
-                _pod_normalize_config_perms "$config_dir"
+                _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
             fi
             podman exec -it -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
             ;;
