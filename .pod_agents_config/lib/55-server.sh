@@ -196,8 +196,8 @@
                 return 0
                 ;;
             restart)
-                pod server stop
-                pod server start
+                _pod_agents_main server stop
+                _pod_agents_main server start
                 return $?
                 ;;
             status)

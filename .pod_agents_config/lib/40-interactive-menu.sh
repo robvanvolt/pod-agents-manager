@@ -21,19 +21,19 @@
 
         case $selected_action in
             quit) echo "Exiting."; return 0 ;;
-            cache-clean) pod cache-clean; return $? ;;
-            doctor) pod doctor; return $? ;;
-            remove-all) pod remove --all; return $? ;;
-            delete-all) pod delete --all; return $? ;;
-            self-update) pod self-update; return $? ;;
+            cache-clean) _pod_agents_main cache-clean; return $? ;;
+            doctor) _pod_agents_main doctor; return $? ;;
+            remove-all) _pod_agents_main remove --all; return $? ;;
+            delete-all) _pod_agents_main delete --all; return $? ;;
+            self-update) _pod_agents_main self-update; return $? ;;
             config)
-                pod config
+                _pod_agents_main config
                 return $?
                 ;;
             base)
                 read -p "Set default base image (alpine, trixie-slim) [${BASE_IMAGE}]: " prompt_base
                 prompt_base="${prompt_base:-$BASE_IMAGE}"
-                pod base "$prompt_base"
+                _pod_agents_main base "$prompt_base"
                 return $?
                 ;;
             server)
@@ -43,7 +43,7 @@
                 PS3="Action: "
                 select sa in "${server_options[@]}" "Cancel"; do
                     [ "$sa" = "Cancel" ] && { PS3="$original_ps3"; return 0; }
-                    [ -n "$sa" ] && { PS3="$original_ps3"; pod server "$sa"; return $?; }
+                    [ -n "$sa" ] && { PS3="$original_ps3"; _pod_agents_main server "$sa"; return $?; }
                 done
                 ;;
             batch)
@@ -65,20 +65,20 @@
                             local extra=""
                             [[ "$prompt_conc" =~ ^[yY] ]] && extra="--concurrent"
                             if [ -n "$prompt_instance" ]; then
-                                pod batch "$prompt_agent" "$prompt_instance" "$prompt_file" $extra
+                                _pod_agents_main batch "$prompt_agent" "$prompt_instance" "$prompt_file" $extra
                             elif [ -n "$prompt_agent" ]; then
-                                pod batch "$prompt_agent" "$prompt_file" $extra
+                                _pod_agents_main batch "$prompt_agent" "$prompt_file" $extra
                             else
-                                pod batch "$prompt_file" $extra
+                                _pod_agents_main batch "$prompt_file" $extra
                             fi
                             return $?
                             ;;
-                        log) pod batch log; return $? ;;
-                        tmux|stats|list) pod batch "$ba"; return $? ;;
+                        log) _pod_agents_main batch log; return $? ;;
+                        tmux|stats|list) _pod_agents_main batch "$ba"; return $? ;;
                         stop)
                             read -p "Batch id (blank to list): " bid
-                            [ -z "$bid" ] && { pod batch list; return 0; }
-                            pod batch stop "$bid"
+                            [ -z "$bid" ] && { _pod_agents_main batch list; return 0; }
+                            _pod_agents_main batch stop "$bid"
                             return $?
                             ;;
                     esac
@@ -87,7 +87,7 @@
             tmux)
                 echo -e "\033[36mEnter instance name for grid view (leave blank for the first pod of all agents):\033[0m"
                 read -p "Instance name: " prompt_instance
-                pod tmux "$prompt_instance"
+                _pod_agents_main tmux "$prompt_instance"
                 return $? 
                 ;;
             update)
@@ -96,7 +96,7 @@
                 prompt_agent="$(pick_agent_or_all)" || { echo "Action canceled."; return 0; }
                 local prompt_instance=""
                 [ -n "$prompt_agent" ] && read -p "Instance name: " prompt_instance
-                pod update "$prompt_agent" "$prompt_instance"
+                _pod_agents_main update "$prompt_agent" "$prompt_instance"
                 return $?
                 ;;
             prebuild)
@@ -111,7 +111,7 @@
                 prompt_volumes="${prompt_volumes:-all}"
                 read -p "Base image (alpine, trixie-slim) [${BASE_IMAGE}]: " prompt_base
                 prompt_base="${prompt_base:-$BASE_IMAGE}"
-                pod prebuild "$prompt_agent" "" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                _pod_agents_main prebuild "$prompt_agent" "" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
                 return $?
                 ;;
             start)
@@ -133,10 +133,10 @@
                 if [ "$prompt_agent" = "All" ]; then
                     for a in "${available_agents[@]}"; do
                         echo -e "\033[1;32mStarting ${a}...\033[0m"
-                        pod start "$a" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                        _pod_agents_main start "$a" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
                     done
                 else
-                    pod start "$prompt_agent" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
+                    _pod_agents_main start "$prompt_agent" "$prompt_instance" "$prompt_flavor" "$prompt_volumes" "$prompt_base"
                 fi
                 return $?
                 ;;
@@ -162,9 +162,9 @@
                 PS3="Pod number: "
                 select selected_pod in "${available_pods[@]}" "Cancel"; do
                     if [ "$selected_pod" == "Cancel" ]; then echo "Action canceled."; break
-                    elif [ "$selected_pod" == "All" ]; then pod stats; return $?
+                    elif [ "$selected_pod" == "All" ]; then _pod_agents_main stats; return $?
                     elif [ -n "$selected_pod" ]; then
-                        pod "$selected_action" "${selected_pod%% *}" "${selected_pod#* }"
+                        _pod_agents_main "$selected_action" "${selected_pod%% *}" "${selected_pod#* }"
                         return $?
                     else echo -e "\033[31mInvalid selection.\033[0m"; fi
                 done

@@ -10,13 +10,14 @@
     }
 
     _pod_print_help() {
+        local _cmd="${user_cmd_name:-pod}"
         cat <<EOF
 pod-agents-manager ${POD_AGENTS_VERSION}
 
 Usage:
-  pod [--help|-h]
-  pod [--version|-v]
-  pod <action> [agent] [instance] [flavor] [volumes] [base] [--model NAME]
+  ${_cmd} [--help|-h]
+  ${_cmd} [--version|-v]
+  ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base] [--model NAME]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -28,17 +29,17 @@ Actions:
   uninstall    uninstall
 
 Examples:
-  pod config
-  pod doctor
-  pod self-update
-  pod start pi dev all all alpine
-  pod start pi dev --model my-other-model
-  pod join pi dev
-  pod batch prompts.txt --concurrent
-  pod batch log
-  pod server start
-  pod uninstall
-  pod --version
+  ${_cmd} config
+  ${_cmd} doctor
+  ${_cmd} self-update
+  ${_cmd} start pi dev all all alpine
+  ${_cmd} start pi dev --model my-other-model
+  ${_cmd} join pi dev
+  ${_cmd} batch prompts.txt --concurrent
+  ${_cmd} batch log
+  ${_cmd} server start
+  ${_cmd} uninstall
+  ${_cmd} --version
 EOF
     }
 

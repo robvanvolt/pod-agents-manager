@@ -307,7 +307,7 @@ EOF
                     rm -rf "${IMAGE_CACHE_ROOT}/${a}-${detected_flavor}-${detected_base}" 2>/dev/null || true
 
                     echo -e "\033[32mApplying update and restarting instance: ${a}-${inst}...\033[0m"
-                    pod restart "$a" "$inst" "$detected_flavor" "all" "$detected_base"
+                    _pod_agents_main restart "$a" "$inst" "$detected_flavor" "all" "$detected_base"
                 done
             done
             echo -e "\033[1;32m🎉 Fleet update complete.\033[0m"

@@ -5,6 +5,9 @@ REPO="${POD_AGENTS_REPO:-robvanvolt/pod-agents-manager}"
 REF="${POD_AGENTS_REF:-main}"
 ARCHIVE_URL="${POD_AGENTS_ARCHIVE_URL:-https://codeload.github.com/${REPO}/tar.gz/refs/heads/${REF}}"
 CONFIG_ROOT="${HOME}/.pod_agents_config"
+# Allow non-interactive override (e.g. CI / scripted installs):
+#   POD_AGENTS_CMD=pods curl ...|bash
+CMD_NAME_OVERRIDE="${POD_AGENTS_CMD:-}"
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1 || {
@@ -30,6 +33,45 @@ detect_shell_rc() {
 
 require_cmd curl
 require_cmd tar
+
+# ----------------------------------------------------------------------------
+# Resolve the user-facing command name. Defaults to `pod`. If something else
+# already provides `pod` on PATH (e.g. CocoaPods at /opt/homebrew/bin/pod),
+# offer the user an alternative so we don't silently shadow it.
+# ----------------------------------------------------------------------------
+existing_pod_path=""
+if command -v pod >/dev/null 2>&1; then
+    existing_pod_path="$(command -v pod 2>/dev/null || true)"
+fi
+# A previous install of ours that defined pod() as a function isn't a
+# collision worth re-prompting for; only worry about external binaries.
+if [ -n "$existing_pod_path" ] && [ -f "$existing_pod_path" ] && [ "$existing_pod_path" != "$HOME/.pod_agents" ]; then
+    if [ -n "$CMD_NAME_OVERRIDE" ]; then
+        chosen_cmd="$CMD_NAME_OVERRIDE"
+        echo "An existing 'pod' was detected at $existing_pod_path; installing under '$chosen_cmd' (POD_AGENTS_CMD)."
+    elif [ -t 0 ] && [ -t 1 ]; then
+        echo "An existing 'pod' command was detected at $existing_pod_path"
+        echo "  (probably CocoaPods or another tool). Installing pod-agents-manager"
+        echo "  under that name would shadow it in your shell."
+        echo
+        read -r -p "Choose a command name for pod-agents-manager [pods]: " chosen_cmd
+        chosen_cmd="${chosen_cmd:-pods}"
+    else
+        # Non-interactive (curl|bash) without override: pick a safe default
+        # rather than silently shadowing.
+        chosen_cmd="pods"
+        echo "An existing 'pod' was detected at $existing_pod_path; installing under '$chosen_cmd'."
+        echo "  (Set POD_AGENTS_CMD=<name> before re-running install.sh to choose a different name.)"
+    fi
+else
+    chosen_cmd="${CMD_NAME_OVERRIDE:-pod}"
+fi
+
+# Validate the chosen name to avoid eval'ing junk later.
+if ! [[ "$chosen_cmd" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+    echo "Invalid command name '$chosen_cmd' — must match [a-zA-Z_][a-zA-Z0-9_-]*" >&2
+    exit 1
+fi
 
 tmp_dir=$(mktemp -d)
 cleanup() {
@@ -61,6 +103,9 @@ merge_tree "$src_root/.pod_agents_config/lib" "$CONFIG_ROOT/lib"
 merge_tree "$src_root/.pod_agents_config/server" "$CONFIG_ROOT/server"
 rm -f "$CONFIG_ROOT/server/static/favicon.ico"
 
+# Persist the chosen command name so .pod_agents picks it up on every shell start.
+printf '%s\n' "$chosen_cmd" > "$CONFIG_ROOT/.cmd_name"
+
 rc_file=$(detect_shell_rc)
 source_line='[ -f "$HOME/.pod_agents" ] && source "$HOME/.pod_agents"'
 touch "$rc_file"
@@ -69,10 +114,11 @@ if ! grep -Fqx "$source_line" "$rc_file"; then
 fi
 
 echo
-echo "Installed pod-agents-manager into ${HOME}."
+echo "Installed pod-agents-manager into ${HOME} as command '${chosen_cmd}'."
 echo "Shell init updated: ${rc_file}"
 echo "Next steps:"
 echo "  exec $(basename "${SHELL:-bash}") -l"
-echo "  pod start <agent> <instance>  # prompts once if POD_* values are unset"
-echo "  pod config                    # optional: adjust saved values later"
-echo "  pod prebuild"
+echo "  ${chosen_cmd} doctor                      # verify host readiness"
+echo "  ${chosen_cmd} start <agent> <instance>    # prompts once if POD_* values are unset"
+echo "  ${chosen_cmd} config                      # optional: adjust saved values later"
+echo "  ${chosen_cmd} prebuild"

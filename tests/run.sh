@@ -322,6 +322,45 @@ t_model_flag_missing_value_errors() {
     [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-model requires a value'
 }
 
+# When ~/.pod_agents_config/.cmd_name contains a custom name (e.g. "pods" for
+# hosts that already have CocoaPods at /usr/bin/pod), the entrypoint must
+# define the user-facing function under THAT name and the help text should
+# reflect it. Internal lib re-entries always use the canonical
+# `_pod_agents_main`, so they keep working regardless.
+t_alias_custom_name() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    printf 'pods\n' > "$sandbox/.pod_agents_config/.cmd_name"
+    out=$(HOME="$sandbox" bash --noprofile --norc -c '
+        set -u
+        # Strip the "complete -W ..." line(s) — interactive-only and would error
+        # under non-interactive bash.
+        tmp_entry=$(mktemp)
+        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
+        # shellcheck disable=SC1090
+        source "$tmp_entry"
+        rm -f "$tmp_entry"
+
+        # The default name MUST NOT exist as a function.
+        if declare -F pod >/dev/null; then echo "ERROR: pod still defined"; exit 2; fi
+        # The chosen name MUST exist and be callable.
+        if ! declare -F pods >/dev/null; then echo "ERROR: pods not defined"; exit 3; fi
+        pods --help
+    ' 2>&1)
+    rm -rf "$sandbox"
+    if ! printf '%s' "$out" | grep -q '^Usage:$'; then
+        echo "  alias-named function failed to print help" >&2
+        echo "$out" | head -8 | sed 's/^/    /' >&2
+        return 1
+    fi
+    # Help text should show "pods" (the alias) in usage examples, not literal "pod".
+    if ! printf '%s' "$out" | grep -qE '^[[:space:]]+pods (config|doctor|start)'; then
+        echo "  help text does not reflect the chosen alias 'pods'" >&2
+        echo "$out" | head -20 | sed 's/^/    /' >&2
+        return 1
+    fi
+}
+
 t_pod_doctor_exit_matches_fail_count() {
     local sandbox out rc fail_count
     sandbox=$(setup_sandbox)
@@ -460,6 +499,7 @@ run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_
 run_test "model flag: --model VAL parses"      t_model_flag_parses
 run_test "model flag: --model=VAL parses"      t_model_flag_eq_form_parses
 run_test "model flag: missing value errors"    t_model_flag_missing_value_errors
+run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 
 echo

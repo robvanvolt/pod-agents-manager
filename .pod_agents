@@ -1,7 +1,21 @@
 # Custom Podman/Quadlet Fleet Manager — entrypoint sources modular helpers from ~/.pod_agents_config/lib/
-pod() {
+#
+# The user-facing command name (default `pod`) is configurable so a host that
+# already has CocoaPods (also `pod`) can install us under a different name.
+# install.sh writes the chosen name to ~/.pod_agents_config/.cmd_name; this
+# entrypoint defines a thin wrapper under that name on top of the canonical
+# `_pod_agents_main` function. Internal lib re-entries always use the
+# canonical name, so they keep working regardless of what the user picked.
+_pod_agents_main() {
     local config_dir_root="$HOME/.pod_agents_config"
     local config_dir_agents="$config_dir_root/agents"
+
+    # User-facing alias name as resolved by .cmd_name (default `pod`). Made
+    # available to lib modules so help text, usage messages, and runtime hints
+    # all reflect what the user actually types.
+    local user_cmd_name
+    user_cmd_name="$(cat "$config_dir_root/.cmd_name" 2>/dev/null | tr -d '[:space:]')"
+    [[ "$user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]] || user_cmd_name="pod"
     local config_dir_flavors="$config_dir_root/flavors"
     local config_dir_skills="$config_dir_root/skills"
     local config_dir_volumes="$config_dir_root/volumes"
@@ -33,4 +47,19 @@ pod() {
         return 1
     fi
 }
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean doctor uninstall quit help version --help --version -h -v" pod
+
+# User-facing command name. Defaults to `pod`; install.sh may write a
+# different name (e.g. `pods`) to .cmd_name when the host already has a
+# colliding `pod` binary like CocoaPods.
+_pod_user_cmd_name="$(cat "$HOME/.pod_agents_config/.cmd_name" 2>/dev/null | tr -d '[:space:]')"
+: "${_pod_user_cmd_name:=pod}"
+
+# Validate to avoid eval'ing arbitrary content from the file.
+if ! [[ "$_pod_user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+    echo -e "\033[31mInvalid command name in ~/.pod_agents_config/.cmd_name; falling back to 'pod'.\033[0m" >&2
+    _pod_user_cmd_name="pod"
+fi
+
+eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
+complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch server base cache-clean doctor uninstall quit help version --help --version --model -h -v" "$_pod_user_cmd_name"
+unset _pod_user_cmd_name

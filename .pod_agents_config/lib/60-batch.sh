@@ -297,12 +297,13 @@
             2) target_agent="${positional[0]}"; prompts_file="${positional[1]}" ;;
             3) target_agent="${positional[0]}"; target_instance="${positional[1]}"; prompts_file="${positional[2]}" ;;
             *)
+                local _cmd="${user_cmd_name:-pod}"
                 cat <<USAGE
 Usage:
-  pod batch <prompts.txt>                       # all running pods (.txt or .json)
-  pod batch <agent> <prompts.txt>               # all running pods of one agent
-  pod batch <agent> <instance> <prompts.txt>    # one specific pod
-  pod batch log [id]   | tmux | stats | list | stop [id]
+  ${_cmd} batch <prompts.txt>                       # all running pods (.txt or .json)
+  ${_cmd} batch <agent> <prompts.txt>               # all running pods of one agent
+  ${_cmd} batch <agent> <instance> <prompts.txt>    # one specific pod
+  ${_cmd} batch log [id]   | tmux | stats | list | stop [id]
   Optional flag: --concurrent  (per-pod parallelism instead of sequential)
   Input formats:
     .txt / plain  — one prompt per line, # comments ignored
