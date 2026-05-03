@@ -1,0 +1,152 @@
+/* Pod Agents Manager — LAN dashboard styles.
+   Palette and brand-mark treatment match the public site (docs/styles.css)
+   so the GitHub Pages landing page and the dashboard read as one product. */
+
+:root {
+    color-scheme: dark;
+    --bg: #080d16;
+    --bg-soft: #0d1524;
+    --panel: rgba(17, 27, 44, 0.74);
+    --panel-strong: #101827;
+    --panel-border: rgba(148, 163, 184, 0.18);
+    --text: #eef5ff;
+    --muted: #a9b6cc;
+    --brand: #68e1fd;
+    --brand-2: #a78bfa;
+    --ok: #34d399;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at 10% 0%, rgba(104, 225, 253, 0.16), transparent 34rem),
+        radial-gradient(circle at 90% 8%, rgba(167, 139, 250, 0.18), transparent 32rem),
+        linear-gradient(180deg, #080d16 0%, #0b1220 46%, #080d16 100%);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: Inter, system-ui, sans-serif;
+    padding: 1.25rem;
+}
+
+.shell { max-width: 1200px; margin: 0 auto; }
+
+.topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    border: 1px solid var(--panel-border); border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)), var(--panel);
+    padding: .9rem 1rem; backdrop-filter: blur(16px);
+}
+
+.brand { display: inline-flex; align-items: center; gap: .75rem; }
+.brand-mark {
+    display: flex; align-items: center; justify-content: center;
+    width: 2.4rem; height: 2.4rem;
+}
+.brand-mark img {
+    width: 2.4rem; height: 2.4rem; object-fit: contain;
+    filter:
+        brightness(0) invert(1)
+        drop-shadow(0 0 6px rgba(104,225,253,.85))
+        drop-shadow(0 0 18px rgba(104,225,253,.4));
+}
+.brand .title-stack { display: flex; flex-direction: column; }
+.brand h1 { margin: 0; font-size: 1.08rem; letter-spacing: -.02em; }
+.brand .tagline { font-size: .72rem; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+
+.meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
+
+/* Topbar chips: small pill labels for version, host, ips, time. */
+.chips {
+    display: flex; flex-wrap: wrap; gap: .35rem;
+    align-items: center; justify-content: flex-end;
+}
+.chip {
+    display: inline-flex; align-items: center; gap: .35rem;
+    border: 1px solid var(--panel-border);
+    background: rgba(15, 23, 42, 0.6);
+    color: var(--text);
+    border-radius: 999px;
+    padding: .25rem .6rem;
+    font-size: .72rem; line-height: 1.2;
+}
+.chip.version {
+    border-color: rgba(104,225,253,.42);
+    color: var(--brand);
+}
+.chip code { font-family: ui-monospace, monospace; font-size: .72rem; opacity: .92; color: inherit; }
+.chip .label { color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-size: .65rem; }
+
+.toast {
+    position: fixed; top: 18px; right: 18px; padding: 10px 14px;
+    border-radius: 9px; display: none; max-width: 420px; word-wrap: break-word;
+    border: 1px solid var(--panel-border);
+}
+.ok  { background: rgba(52, 211, 153, 0.2);  color: #d6ffe7; }
+.err { background: rgba(239, 68, 68, 0.22);  color: #ffd2d2; }
+
+.card {
+    margin-top: 1rem; border: 1px solid var(--panel-border); border-radius: 1rem;
+    background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)), var(--panel);
+    backdrop-filter: blur(16px); padding: 1rem;
+}
+.card h2 { margin: 0 0 .8rem 0; font-size: 1rem; letter-spacing: -.02em; }
+
+table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+th, td { border: 1px solid rgba(148,163,184,.18); padding: .48rem .58rem; text-align: left; vertical-align: middle; }
+th { background: rgba(15, 23, 42, 0.82); position: sticky; top: 0; color: #c7d5ec; }
+tr:nth-child(even) { background: rgba(15, 23, 42, 0.24); }
+
+button {
+    background: rgba(15, 23, 42, 0.9); color: #eef5ff;
+    border: 1px solid rgba(148,163,184,.24); border-radius: 999px;
+    padding: .35rem .65rem; cursor: pointer; font-size: .75rem;
+}
+button:hover { border-color: rgba(104,225,253,.48); color: var(--brand); }
+.danger { border-color: rgba(248,113,113,.5); color: #fecaca; }
+.danger:hover { border-color: #f87171; color: #fee2e2; }
+
+.inline { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+.heat-wrap { position: relative; min-height: 1.2em; min-width: 60px; padding: 2px 6px; }
+.heat-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; }
+.heat-text { position: relative; z-index: 1; }
+
+code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+}
+.grid label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.grid input, .grid select {
+    width: 100%; background: rgba(15,23,42,.8); color: #eef5ff;
+    border: 1px solid rgba(148,163,184,.25); border-radius: .55rem;
+    padding: .45rem .6rem; font-size: .84rem;
+}
+
+.actions-row { margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+.actions-row button { padding: .48rem .85rem; font-size: .84rem; }
+.actions-row .primary {
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #04111b; border-color: rgba(104,225,253,.5);
+}
+
+.out {
+    margin-top: 10px; max-height: 220px; overflow: auto;
+    background: rgba(3,7,18,.65);
+    border: 1px solid rgba(148,163,184,.2); border-radius: .7rem;
+    padding: 8px; font-family: ui-monospace, monospace; font-size: 12px;
+    white-space: pre-wrap; display: none;
+}
+
+@media (max-width: 760px) {
+    body { padding: .8rem; }
+    .topbar { flex-direction: column; align-items: flex-start; }
+    .chips { justify-content: flex-start; }
+    th, td { font-size: .74rem; }
+}

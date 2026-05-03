@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://robvanvolt.github.io/pod-agents-manager/
+    about: Browse the GitHub Pages site for usage, install, and command reference.
+  - name: README
+    url: https://github.com/robvanvolt/pod-agents-manager#readme
+    about: Quick reference, architecture diagram, and the full command surface.

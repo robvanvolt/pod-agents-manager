@@ -1,0 +1,64 @@
+name: Bug report
+description: Something `pod` does, fails to do, or does wrong.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The most useful single thing you can attach
+        is the output of `pod doctor` — it captures the host state in one go.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, what did you actually see?
+      placeholder: |
+        I ran `pod start pi dev` and …
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: pod doctor output
+      description: Paste the full output of `pod doctor`.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: pod-version
+    attributes:
+      label: pod-agents-manager version
+      description: Output of `pod --version`.
+      placeholder: pod-agents-manager 0.2.2n
+    validations:
+      required: true
+
+  - type: input
+    id: podman-version
+    attributes:
+      label: Podman version
+      description: Output of `podman --version`.
+      placeholder: podman version 5.2.1
+    validations:
+      required: false
+
+  - type: input
+    id: distro
+    attributes:
+      label: Linux distribution
+      placeholder: Debian 12, Ubuntu 24.04, Fedora 40, …
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / output
+      description: |
+        Full output of the failing command. For dashboard issues, also include
+        `pod server logs`. For batch issues, include the runner log path.
+      render: text

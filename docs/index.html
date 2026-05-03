@@ -60,6 +60,12 @@
           <a class="button secondary" href="https://github.com/robvanvolt/pod-agents-manager">View source</a>
         </div>
         <div class="badges" aria-label="Project metadata">
+          <a href="https://github.com/robvanvolt/pod-agents-manager/blob/main/.pod_agents_config/version.conf">
+            <img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Frobvanvolt%2Fpod-agents-manager%2Fmain%2F.pod_agents_config%2Fversion.conf&search=POD_AGENTS_VERSION%3D%22%28%5B%5E%22%5D%2B%29%22&replace=%241&label=version&color=informational" alt="Latest version">
+          </a>
+          <a href="https://github.com/robvanvolt/pod-agents-manager/actions/workflows/tests.yml">
+            <img src="https://github.com/robvanvolt/pod-agents-manager/actions/workflows/tests.yml/badge.svg" alt="Tests status">
+          </a>
           <span>Apache 2.0</span>
           <span>Bash</span>
           <span>Podman</span>
@@ -91,14 +97,17 @@
   pod &lt;action&gt; [agent] [instance] [flavor] [volumes] [base]
 
 Actions:
-  lifecycle: start stop restart status stats remove delete remove-all delete-all
-  interaction: join enter it tmux config
-  image: prebuild update self-update cache-clean base
-  batch: batch [tmux|stats|list|stop &lt;id&gt;|...]
-  server: server {start|stop|restart|status|logs|build}
+  lifecycle:    start stop restart status stats remove delete remove-all delete-all
+  interaction:  join enter it tmux config
+  images:       prebuild update self-update cache-clean base
+  batch:        batch [log [id]|tmux|stats|list|stop &lt;id&gt;|...]
+  server:       server {start|stop|restart|status|logs|build}
+  diagnostics:  doctor
+  uninstall:    uninstall
 
 Examples:
   pod config
+  pod doctor
   pod self-update
   pod start pi dev all all alpine
   pod batch prompts.txt --concurrent
@@ -157,6 +166,10 @@ Examples:
           <h3>LAN dashboard</h3>
           <p>Run a small Go web UI on the host for stats, starts, stops, restarts, deletes, and new pod creation.</p>
         </article>
+        <article class="feature-card">
+          <h3>Self-diagnosing</h3>
+          <p><code>pod doctor</code> reports podman, systemd, layout, env, port, and endpoint readiness with one-line fix hints — so misconfigured hosts fail fast.</p>
+        </article>
       </div>
     </section>
 
@@ -197,7 +210,7 @@ Examples:
       <div class="section-heading">
         <p class="section-kicker">Install</p>
         <h2>Install with one command, source one function, start a pod.</h2>
-        <p>Requirements: Linux, Bash 4+, rootless Podman, systemd user services, and an OpenAI-compatible inference endpoint.</p>
+        <p>Requirements: Linux, Bash 4+ on the runtime host, rootless Podman, systemd user services, and an OpenAI-compatible inference endpoint. The lint and test suite runs on macOS too (Bash 3.2+).</p>
       </div>
       <div class="steps">
         <article class="step-card">
@@ -226,6 +239,10 @@ pod prebuild</code></pre>
           <h2>A useful first session takes seconds after setup.</h2>
         </div>
         <div class="command-list">
+          <div>
+            <code>pod doctor</code>
+            <span>Verify the host can run pods before anything else.</span>
+          </div>
           <div>
             <code>pod start pi dev</code>
             <span>Start a Pi coding agent instance named <strong>dev</strong>.</span>
@@ -276,6 +293,10 @@ pod prebuild</code></pre>
         <article>
           <h3>Dashboard</h3>
           <p><code>server start</code>, <code>server stop</code>, <code>server restart</code>, <code>server logs</code>, <code>server build</code></p>
+        </article>
+        <article>
+          <h3>Diagnostics</h3>
+          <p><code>doctor</code> — host readiness checks with PASS / WARN / FAIL output and one-line fix hints.</p>
         </article>
         <article>
           <h3>Discovery</h3>
@@ -376,6 +397,30 @@ pod batch pi dev prompts.txt --concurrent
 pod batch tmux
 pod batch stats
 pod batch stop 20260430-120000</code></pre>
+      </div>
+    </section>
+
+    <section class="section split" id="development">
+      <div>
+        <p class="section-kicker">Development</p>
+        <h2>Tested on every push. Single-file lint and sham suite.</h2>
+        <p>
+          The entrypoint sources numbered modules from <code>~/.pod_agents_config/lib/NN-*.sh</code> in order; each
+          module ends with a <code>return 99</code> sentinel so explicit early returns propagate correctly. A single
+          <code>tests/run.sh</code> runs <code>bash -n</code> syntax checks, <code>shellcheck</code>, the lib loader
+          contract, install / self-update regression guards, sandboxed smoke tests for <code>--help</code>,
+          <code>--version</code>, and <code>doctor</code>, helper-function unit tests, and a check that
+          <code>pod --version</code> agrees with <code>version.conf</code>. The same suite runs on every push and
+          pull request via GitHub Actions.
+        </p>
+      </div>
+      <div class="batch-panel">
+        <pre><code># run the full suite locally — no podman or systemd needed
+bash tests/run.sh
+
+# bump release: edit one file, commit, push
+echo 'POD_AGENTS_VERSION="0.2.3"' &gt; .pod_agents_config/version.conf
+git commit -am "version 0.2.3" &amp;&amp; git push</code></pre>
       </div>
     </section>
 
