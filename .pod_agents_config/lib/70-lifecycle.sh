@@ -251,8 +251,37 @@ ExecStartPre=/usr/bin/mkdir -p ${WORKSPACES_ROOT}/${agent}-pods/%i/workspace ${W
 WantedBy=default.target
 EOF
     }
+    # 4. Workspace Preparation
+    if [[ "$action" =~ ^(start|restart|join|enter|it)$ ]] && [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+        local instance_workspace="$workspace_root/${instance}/workspace"
+        if [[ "$WORKSPACE_DIR_OVERRIDE" == "http://"* ]] || [[ "$WORKSPACE_DIR_OVERRIDE" == "https://"* ]] || [[ "$WORKSPACE_DIR_OVERRIDE" == "git@"* ]]; then
+            local repo_name
+            repo_name=$(basename "$WORKSPACE_DIR_OVERRIDE" .git)
+            local target_dir="$instance_workspace/$repo_name"
+            if [ ! -d "$target_dir" ]; then
+                echo -e "\033[36mCloning ${WORKSPACE_DIR_OVERRIDE} into workspace...\033[0m"
+                mkdir -p "$instance_workspace"
+                if command -v git >/dev/null 2>&1; then
+                    git clone "$WORKSPACE_DIR_OVERRIDE" "$target_dir" || true
+                else
+                    echo -e "\033[33mHost git not found, using alpine/git via podman...\033[0m"
+                    podman run --rm -v "$instance_workspace:/workspace:Z" docker.io/alpine/git clone "$WORKSPACE_DIR_OVERRIDE" "/workspace/$repo_name" || true
+                fi
+            fi
+            WORKSPACE_DIR_OVERRIDE="$repo_name"
+        else
+            local target_dir
+            if [[ "$WORKSPACE_DIR_OVERRIDE" == /* ]]; then
+                local rel_path="${WORKSPACE_DIR_OVERRIDE#/workspace/}"
+                target_dir="$instance_workspace/$rel_path"
+            else
+                target_dir="$instance_workspace/$WORKSPACE_DIR_OVERRIDE"
+            fi
+            mkdir -p "$target_dir"
+        fi
+    fi
 
-    # 4. Action Execution Logic
+    # 5. Action Execution Logic
     case "$action" in
         stats)
             if [ -n "$agent" ] && [ -n "$instance" ]; then
