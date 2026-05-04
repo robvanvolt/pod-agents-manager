@@ -546,7 +546,33 @@ EOF
                 podman exec "$container_name" tmux kill-session -t bot 2>/dev/null || true
                 echo -e "\033[33m  → agent session will restart with new config on attach.\033[0m"
             fi
-            podman exec -it "${exec_args[@]}" -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
+            # Start the tmux session detached inside the container if it
+            # doesn't already exist.  This decouples the tmux server lifetime
+            # from the interactive podman-exec we attach with below, so
+            # Ctrl+D / Ctrl+B,D only kills the *client*; the agent process
+            # inside the tmux session keeps running and can be reattached.
+            if ! podman exec "$container_name" tmux has-session -t bot 2>/dev/null; then
+                podman exec "${exec_args[@]}" \
+                    -e POD_AGENT="$agent" \
+                    -e OPENAI_BASE_URL="$OPENAI_BASE_URL" \
+                    -e OPENAI_API_BASE="$OPENAI_BASE_URL" \
+                    -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+                    -e DEFAULT_MODEL="$DEFAULT_MODEL" \
+                    -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" \
+                    "$container_name" \
+                    bash -lc 'tmux new-session -d -s bot "bash -lc \"${POD_AGENT} || true; exec bash\""'
+            fi
+            # Now attach interactively — exiting this only drops the client.
+            podman exec -it "${exec_args[@]}" \
+                -e TERM=xterm-256color -e COLORTERM=truecolor \
+                -e POD_AGENT="$agent" \
+                -e OPENAI_BASE_URL="$OPENAI_BASE_URL" \
+                -e OPENAI_API_BASE="$OPENAI_BASE_URL" \
+                -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+                -e DEFAULT_MODEL="$DEFAULT_MODEL" \
+                -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" \
+                "$container_name" \
+                tmux attach -t bot
             ;;
         it)
             local exec_args=()
