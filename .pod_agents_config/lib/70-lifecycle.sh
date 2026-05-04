@@ -21,23 +21,42 @@
         local _mount="${3:-}"     # mount point inside container (AGENT_VOLUME_CONFIG_PATH)
         [ -d "$_cfg" ] || return 0
 
-        # Host-side: world-readable + writable so the container's UID-mapped
-        # view can always access them. On a per-pod sandbox dir this is
-        # equivalent to "the host user owns it" anyway.
+        # Host-side: best-effort. If files are owned by host subuids (because
+        # an in-container non-zero UID created them), this silently no-ops on
+        # those — the container-side step below handles that case.
         chmod -R a+rwX "$_cfg" 2>/dev/null || true
 
-        # Container-side: handles the case where pi/claude/etc. created files
-        # earlier as a non-zero in-container UID, which on the host map to a
-        # subuid the host user can NOT chmod or overwrite. Inside the container,
-        # root has full DAC and can chmod regardless of host ownership.
+        # Container-side: the authoritative fix. Inside the container, root
+        # has CAP_CHOWN and CAP_DAC_OVERRIDE within its user namespace, so it
+        # can both chown and chmod every file regardless of how the file got
+        # there or what UID it appears to be owned by from the host's view.
         if [ -n "$_container" ] && [ -n "$_mount" ] \
            && podman ps --format '{{.Names}}' 2>/dev/null | grep -qFx "$_container"; then
-            podman exec --user 0:0 "$_container" sh -c "
+            local _norm_out _norm_rc
+            # Use \; (POSIX-safe; busybox find on alpine accepts both, but \;
+            # is the broadest compatibility guarantee). chown FIRST so chmod
+            # is applied to the canonical owner, not subuid ghosts.
+            _norm_out=$(podman exec --user 0 "$_container" sh -c "
+                set -e
                 if [ -d '$_mount' ]; then
-                    find '$_mount' -type d -exec chmod 0777 {} + 2>/dev/null
-                    find '$_mount' -type f -exec chmod 0666 {} + 2>/dev/null
+                    chown -R 0:0 '$_mount' 2>&1 || echo 'chown failed' >&2
+                    # 0666/0777 (world rw) — defense-in-depth so even if chown
+                    # silently failed for some files, every UID inside the
+                    # container can still read/write. Per-pod sandbox dir, so
+                    # there's no real attack surface.
+                    find '$_mount' -type d -exec chmod 0777 {} \\; 2>&1 || true
+                    find '$_mount' -type f -exec chmod 0666 {} \\; 2>&1 || true
+                else
+                    mkdir -p '$_mount'
+                    chown 0:0 '$_mount' 2>&1 || true
+                    chmod 0777 '$_mount'
                 fi
-            " 2>/dev/null || true
+            " 2>&1)
+            _norm_rc=$?
+            if [ "$_norm_rc" -ne 0 ]; then
+                echo -e "\033[33m[perms] container-side normalize on $_container exited $_norm_rc:\033[0m" >&2
+                printf '%s\n' "$_norm_out" | sed 's/^/  /' >&2
+            fi
         fi
     }
 
