@@ -209,6 +209,19 @@
             fi
         fi
         # -------------------------------------
+
+        # --- Port Publishing ---
+        # PORTS_OVERRIDE is a comma-separated list of host:container port
+        # mappings (e.g. "3000:3000" or "3000:3000,8080:8080").
+        local publish_ports=""
+        if [ -n "${PORTS_OVERRIDE:-}" ]; then
+            local IFS=','
+            for _port_map in $PORTS_OVERRIDE; do
+                [ -n "$_port_map" ] && publish_ports+="PublishPort=${_port_map}"$'\n'
+            done
+            unset IFS
+        fi
+        # -----------------------
         
         local work_dir="/workspace"
         if [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
@@ -231,7 +244,7 @@ ContainerName=${agent}-%i
 Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/workspace:/workspace:Z,U
 Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z,U
 Volume=%h/.pod_agents_config/skills:/srv/skills:ro,z
-${dynamic_volumes}WorkingDir=${work_dir}
+${dynamic_volumes}${publish_ports}WorkingDir=${work_dir}
 Environment=OPENAI_BASE_URL=${OPENAI_BASE_URL}
 Environment=OPENAI_API_BASE=${OPENAI_BASE_URL}
 Environment=OPENAI_API_KEY=${OPENAI_API_KEY}

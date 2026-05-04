@@ -19,6 +19,7 @@ Usage:
   ${_cmd} [--version|-v]
   ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base]
             [--model NAME] [--endpoint URL] [--api-key KEY]
+            [--ports HOST:CONTAINER[,...]]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -38,6 +39,7 @@ Examples:
   ${_cmd} enter pi dev --endpoint http://192.168.1.10:8000/v1 --api-key sk-...
   ${_cmd} start pi dev --endpoint http://127.0.0.1:8000/v1 --api_key sk-local
   ${_cmd} join pi dev
+  ${_cmd} restart opencode dev --ports 3000:3000
   ${_cmd} batch prompts.txt --concurrent
   ${_cmd} batch log
   ${_cmd} server start

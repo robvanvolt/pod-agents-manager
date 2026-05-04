@@ -18,6 +18,7 @@
     local ENDPOINT_OVERRIDE=""
     local API_KEY_OVERRIDE=""
     local WORKSPACE_DIR_OVERRIDE=""
+    local PORTS_OVERRIDE=""
     local _mf_args=() _mf_skip=0 _mf_expect="" _mf_arg
     for _mf_arg in "$@"; do
         if [ "$_mf_skip" = "1" ]; then
@@ -26,6 +27,7 @@
                 endpoint) ENDPOINT_OVERRIDE="$_mf_arg" ;;
                 api_key) API_KEY_OVERRIDE="$_mf_arg" ;;
                 workspace) WORKSPACE_DIR_OVERRIDE="$_mf_arg" ;;
+                ports) PORTS_OVERRIDE="$_mf_arg" ;;
             esac
             _mf_skip=0
             _mf_expect=""
@@ -35,6 +37,7 @@
             --model=*) MODEL_OVERRIDE="${_mf_arg#--model=}" ;;
             --endpoint=*) ENDPOINT_OVERRIDE="${_mf_arg#--endpoint=}" ;;
             --workspace=*) WORKSPACE_DIR_OVERRIDE="${_mf_arg#--workspace=}" ;;
+            --ports=*) PORTS_OVERRIDE="${_mf_arg#--ports=}" ;;
             # All three spellings are accepted; --api-key is the canonical one
             # shown in help text. Underscore and run-together forms are kept
             # because users naturally type them.
@@ -42,6 +45,7 @@
             --model)   _mf_skip=1; _mf_expect="model" ;;
             --endpoint) _mf_skip=1; _mf_expect="endpoint" ;;
             --workspace) _mf_skip=1; _mf_expect="workspace" ;;
+            --ports) _mf_skip=1; _mf_expect="ports" ;;
             --api-key|--api_key|--apikey) _mf_skip=1; _mf_expect="api_key" ;;
             *)         _mf_args+=("$_mf_arg") ;;
         esac
@@ -56,6 +60,9 @@
                 ;;
             workspace)
                 echo -e "\033[31m--workspace requires a value (e.g. --workspace agents-dimensions or --workspace=/workspace/agents-dimensions).\033[0m" >&2
+                ;;
+            ports)
+                echo -e "\033[31m--ports requires a value (e.g. --ports 3000:3000 or --ports=3000:3000,8080:8080).\033[0m" >&2
                 ;;
             api_key)
                 echo -e "\033[31m--api-key requires a value (e.g. --api-key sk-... or --api-key=sk-...).\033[0m" >&2
