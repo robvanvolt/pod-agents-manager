@@ -425,7 +425,7 @@ EOF
             # plain mkdir/rm/cp/ln are sufficient. `podman unshare` would only be needed to overwrite files that the
             # container itself wrote with non-root in-namespace UIDs — not the case for our config files.
             mkdir -p "$config_dir/agent" 2>/dev/null || true
-            rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+            rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
 
             agent_generate_config "$config_dir" "$action"
             _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
@@ -462,7 +462,7 @@ EOF
                 # (which on the host land in the subuid range and are otherwise
                 # untouchable for the host user).
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
-                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
                 # Pass "restart" — every shipped agent treats "update" as
                 # "preserve existing config" and early-returns, so passing
                 # "update" here would delete the files without regenerating
@@ -471,7 +471,11 @@ EOF
                 # POST-normalize: ensure the newly-written files are accessible
                 # to whatever UID the agent actually runs as inside the container.
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
-                echo -e "\033[33m  → most agents pick this up on next prompt; if yours caches config aggressively, run \`${user_cmd_name:-pod} restart $agent $instance\` with the same override flags.\033[0m"
+                # Kill the existing tmux agent session so the agent restarts
+                # with the new config instead of reattaching to a stale process
+                # that has the old model/endpoint cached in memory.
+                podman exec "$container_name" tmux kill-session -t bot 2>/dev/null || true
+                echo -e "\033[33m  → agent session will restart with new config on attach.\033[0m"
             fi
             podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
@@ -479,7 +483,7 @@ EOF
             if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
                 # See note on join|enter for the pre/post-normalize sandwich.
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
-                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
+                rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
                 # See note above on join|enter — "update" is a no-op for every shipped agent.
                 agent_generate_config "$config_dir" "restart"
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
