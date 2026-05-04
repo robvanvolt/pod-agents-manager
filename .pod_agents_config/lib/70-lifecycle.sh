@@ -210,6 +210,15 @@
         fi
         # -------------------------------------
         
+        local work_dir="/workspace"
+        if [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+            if [[ "$WORKSPACE_DIR_OVERRIDE" == /* ]]; then
+                work_dir="$WORKSPACE_DIR_OVERRIDE"
+            else
+                work_dir="/workspace/$WORKSPACE_DIR_OVERRIDE"
+            fi
+        fi
+
         mkdir -p "$(dirname "$quadlet_file")"
         cat <<EOF > "$quadlet_file"
 [Unit]
@@ -222,7 +231,7 @@ ContainerName=${agent}-%i
 Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/workspace:/workspace:Z,U
 Volume=${WORKSPACES_ROOT}/${agent}-pods/%i/config:${AGENT_VOLUME_CONFIG_PATH}:Z,U
 Volume=%h/.pod_agents_config/skills:/srv/skills:ro,z
-${dynamic_volumes}WorkingDir=/workspace
+${dynamic_volumes}WorkingDir=${work_dir}
 Environment=OPENAI_BASE_URL=${OPENAI_BASE_URL}
 Environment=OPENAI_API_BASE=${OPENAI_BASE_URL}
 Environment=OPENAI_API_KEY=${OPENAI_API_KEY}
@@ -232,6 +241,7 @@ Environment=ANTHROPIC_MODEL=${DEFAULT_MODEL}
 Environment=LLM=${DEFAULT_MODEL}
 NoNewPrivileges=true
 Exec=sleep infinity
+
 
 [Service]
 TimeoutStartSec=15
@@ -469,11 +479,22 @@ EOF
             fi
             ;;
         join|enter)
-            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
+            local exec_args=()
+            if [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+                local wd="/workspace"
+                if [[ "$WORKSPACE_DIR_OVERRIDE" == /* ]]; then
+                    wd="$WORKSPACE_DIR_OVERRIDE"
+                else
+                    wd="/workspace/$WORKSPACE_DIR_OVERRIDE"
+                fi
+                exec_args+=("-w" "$wd")
+            fi
+            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ] || [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
                 local override_bits=()
                 [ -n "${MODEL_OVERRIDE:-}" ] && override_bits+=("--model=${MODEL_OVERRIDE}")
                 [ -n "${ENDPOINT_OVERRIDE:-}" ] && override_bits+=("--endpoint=${ENDPOINT_OVERRIDE}")
                 [ -n "${API_KEY_OVERRIDE:-}" ] && override_bits+=("--api_key=<hidden>")
+                [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ] && override_bits+=("--workspace=${WORKSPACE_DIR_OVERRIDE}")
                 echo -e "\033[36mApplying overrides (${override_bits[*]}) to ${container_name} (regenerating agent config)...\033[0m"
                 # PRE-normalize: chmod the bind-mount dirs to 0777 from inside
                 # the container so the host CAN rm/mv into them even if pi
@@ -496,10 +517,20 @@ EOF
                 podman exec "$container_name" tmux kill-session -t bot 2>/dev/null || true
                 echo -e "\033[33m  → agent session will restart with new config on attach.\033[0m"
             fi
-            podman exec -it -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
+            podman exec -it "${exec_args[@]}" -e TERM=xterm-256color -e COLORTERM=truecolor -e POD_AGENT="$agent" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash -lc 'cmd="$POD_AGENT"; tmux has-session -t bot 2>/dev/null && exec tmux attach -t bot || exec tmux new-session -s bot "bash -lc \"$cmd || true; exec bash\""'
             ;;
         it)
-            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ]; then
+            local exec_args=()
+            if [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+                local wd="/workspace"
+                if [[ "$WORKSPACE_DIR_OVERRIDE" == /* ]]; then
+                    wd="$WORKSPACE_DIR_OVERRIDE"
+                else
+                    wd="/workspace/$WORKSPACE_DIR_OVERRIDE"
+                fi
+                exec_args+=("-w" "$wd")
+            fi
+            if [ -n "${MODEL_OVERRIDE:-}" ] || [ -n "${ENDPOINT_OVERRIDE:-}" ] || [ -n "${API_KEY_OVERRIDE:-}" ] || [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
                 # See note on join|enter for the pre/post-normalize sandwich.
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
                 rm -f "$config_dir/config.toml" "$config_dir/crush.json" "$config_dir/settings.json" "$config_dir/agent/settings.json" "$config_dir/agent/models.json" 2>/dev/null || true
@@ -507,7 +538,7 @@ EOF
                 agent_generate_config "$config_dir" "restart"
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
             fi
-            podman exec -it -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
+            podman exec -it "${exec_args[@]}" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
             ;;
         *)
             echo "Unknown action: $action"
