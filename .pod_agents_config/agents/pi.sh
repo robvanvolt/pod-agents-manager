@@ -39,8 +39,8 @@ agent_generate_config() {
         models_json+="{\"id\":\"$m\"}"
     done
 
-    local temp_models="/tmp/pi_models_$$.json"
-    cat <<EOF > "$temp_models"
+    mkdir -p "$config_dir/agent" 2>/dev/null || true
+    cat <<EOF > "$config_dir/agent/models.json"
 {
   "defaultProvider": "rms",
   "defaultModel": "${first_model}",
@@ -56,16 +56,11 @@ agent_generate_config() {
 }
 EOF
 
-    local temp_settings="/tmp/pi_settings_$$.json"
-    cat <<EOF > "$temp_settings"
+    cat <<EOF > "$config_dir/agent/settings.json"
 {
   "enableInstallTelemetry": false,
   "defaultProvider": "rms",
   "defaultModel": "${first_model}"
 }
 EOF
-
-    mkdir -p "$config_dir/agent" 2>/dev/null || true
-    mv -f "$temp_models" "$config_dir/agent/models.json"
-    mv -f "$temp_settings" "$config_dir/agent/settings.json"
 }

@@ -31,6 +31,10 @@
         # an in-container non-zero UID created them), this silently no-ops on
         # those — the container-side step below handles that case.
         chmod -R a+rwX "$_cfg" 2>/dev/null || true
+        # SELinux: copy the directory's label (container_file_t from :Z) to
+        # any child that may have been written with a different context (e.g.
+        # user_tmp_t from a /tmp mv). No-ops on non-SELinux hosts.
+        chcon -R --reference="$_cfg" "$_cfg" 2>/dev/null || true
 
         # Container-side: the authoritative fix. Inside the container, root
         # has CAP_CHOWN and CAP_DAC_OVERRIDE within its user namespace, so it

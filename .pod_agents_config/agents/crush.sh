@@ -27,13 +27,11 @@ agent_generate_config() {
         if [ $i -lt $((${#ADDR[@]}-1)) ]; then crush_models_json+=","; fi
     done
 
-    local temp_cfg="/tmp/crush_$$.json"
-    cat <<EOF > "$temp_cfg"
+    cat <<EOF > "$config_dir/crush.json"
 {
   "\$schema": "https://charm.land/crush.json",
   "providers": { "custom_env": { "type": "openai-compat", "base_url": "${OPENAI_BASE_URL}", "api_key": "${OPENAI_API_KEY}", "models": [${crush_models_json}] } },
   "options": { "disable_metrics": true, "disable_provider_auto_update": true, "disable_default_providers": true }
 }
 EOF
-    mv -f "$temp_cfg" "$config_dir/crush.json"
 }

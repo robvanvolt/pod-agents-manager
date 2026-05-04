@@ -38,8 +38,8 @@ agent_generate_config() {
         models_json+="\"$m\": { \"name\": \"$m\" }"
     done
     
-    local temp_cfg="/tmp/opencode_$$.jsonc"
-    cat <<EOF > "$temp_cfg"
+    rm -f "$config_dir/config.json" 2>/dev/null || true
+    cat <<EOF > "$config_dir/opencode.jsonc"
 {
   "\$schema": "https://opencode.ai/config.json",
   "model": "rms/${first_model}",
@@ -63,7 +63,4 @@ agent_generate_config() {
   }
 }
 EOF
-    
-    rm -f "$config_dir/config.json" 2>/dev/null || true
-    mv -f "$temp_cfg" "$config_dir/opencode.jsonc"
 }

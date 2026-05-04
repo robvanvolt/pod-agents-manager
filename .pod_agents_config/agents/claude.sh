@@ -36,8 +36,7 @@ agent_generate_config() {
     
     echo -e "\033[36mGenerating claude settings (KV Cache & Telemetry fixes)...\033[0m"
     
-    local temp_cfg="/tmp/claude_$$.json"
-    cat <<EOF > "$temp_cfg"
+    cat <<EOF > "$config_dir/settings.json"
 {
   "promptSuggestionEnabled": false,
   "env": {
@@ -56,6 +55,4 @@ agent_generate_config() {
   "effortLevel": "high"
 }
 EOF
-    
-    mv -f "$temp_cfg" "$config_dir/settings.json"
 }

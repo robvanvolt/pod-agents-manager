@@ -36,9 +36,8 @@ agent_generate_config() {
         if [ $i -lt $((${#ADDR[@]}-1)) ]; then models_json+=","; fi
     done
 
-    local temp_models="/tmp/LLM_$$.json"
-    local temp_settings="/tmp/pi_settings_$$.json"
-    cat <<EOF > "$temp_models"
+    mkdir -p "$config_dir/agent" 2>/dev/null || true
+    cat <<EOF > "$config_dir/agent/models.json"
 {
   "defaultProvider": "custom_env",
   "defaultModel": "${first_model}",
@@ -52,7 +51,7 @@ agent_generate_config() {
   }
 }
 EOF
-    cat <<EOF > "$temp_settings"
+    cat <<EOF > "$config_dir/settings.json"
 {
   "enableInstallTelemetry": false,
   "defaultProvider": "custom_env",
@@ -60,7 +59,4 @@ EOF
   "models": [${models_json}]
 }
 EOF
-    mkdir -p "$config_dir/agent" 2>/dev/null || true
-    mv -f "$temp_models" "$config_dir/agent/models.json"
-    mv -f "$temp_settings" "$config_dir/settings.json"
 }

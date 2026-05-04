@@ -35,8 +35,7 @@ agent_generate_config() {
         models_json+="\"$m\""
     done
 
-    local temp_cfg="/tmp/nanocoder_$$.json"
-    cat <<EOF > "$temp_cfg"
+    cat <<EOF > "$config_dir/agents.config.json"
 {
   "nanocoder": {
     "providers": [
@@ -51,6 +50,4 @@ agent_generate_config() {
   }
 }
 EOF
-
-    mv -f "$temp_cfg" "$config_dir/agents.config.json"
 }

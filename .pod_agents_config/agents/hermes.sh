@@ -33,8 +33,7 @@ agent_generate_config() {
         if [ -z "$first_model" ]; then first_model="$m"; fi
     done
 
-    local temp_cfg="/tmp/hermes_cfg_$$.yaml"
-    cat <<EOF > "$temp_cfg"
+    cat <<EOF > "$config_dir/config.yaml"
 model:
   provider: custom
   default: ${first_model}
@@ -45,5 +44,4 @@ memory:
   enabled: true
   skill_generation: true
 EOF
-    mv -f "$temp_cfg" "$config_dir/config.yaml"
 }
