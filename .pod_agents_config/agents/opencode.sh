@@ -4,7 +4,8 @@ agent_build_containerfile() {
     local build_dir="$1"
     local flavor="$2"
     
-    write_base_node_containerfile "$build_dir" "$flavor"
+    # opencode binary uses glibc, force Debian (trixie-slim) instead of Alpine
+    write_base_node_containerfile "$build_dir" "$flavor" "trixie-slim"
     cat <<'EOF' >> "$build_dir/Containerfile"
 # Install OpenCode (package name requires the -ai suffix)
 RUN npm install -g opencode-ai && npm cache clean --force
