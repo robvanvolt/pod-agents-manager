@@ -46,6 +46,16 @@ agent_generate_config() {
   "model": "rms/${first_model}",
   "share": "disabled",
   "autoupdate": false,
+  "agent": {
+    "yolo": {
+      "description": "Dangerously skip permissions",
+      "permission": {
+        "*": {
+          "*": "allow"
+        }
+      }
+    }
+  },
   "experimental": {
     "openTelemetry": false
   },
