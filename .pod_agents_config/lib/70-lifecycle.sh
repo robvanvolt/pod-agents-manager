@@ -13,6 +13,12 @@
     # nothing on a per-pod sandbox dir and removes the entire class of issue,
     # while keeping default-rootless UID mapping (no UserNS=keep-id, which would
     # break access to /root/<dir> in agent images).
+    #
+    # On SELinux hosts (Fedora, RHEL) the :Z bind-mount flag labels files at
+    # container start. Files written from the host AFTER that carry the host
+    # context and cause EACCES inside the container even if POSIX permissions
+    # look fine.  We re-create each file from inside the container so it
+    # inherits the container's SELinux context.
     # ------------------------------------------------------------------------
     _pod_normalize_config_perms() {
         local _cfg="$1"           # host path, e.g. ~/Developer/pi-pods/dev/config
@@ -39,11 +45,20 @@
             _norm_out=$(podman exec --user 0 "$_container" sh -c "
                 set -e
                 if [ -d '$_mount' ]; then
+                    # --- SELinux re-stamp --------------------------------
+                    # On hosts with SELinux enforcing (e.g. Fedora), the :Z
+                    # bind-mount flag labels files at container start. Files
+                    # written from the HOST after that carry the host context
+                    # and are denied (EACCES) inside the container. chown/chmod
+                    # do NOT fix SELinux labels.  Re-creating each file from
+                    # inside the container (cat > .tmp && mv) stamps the new
+                    # inode with the container's SELinux context.
+                    find '$_mount' -type f ! -name '*.tmp.relabel' 2>/dev/null | while IFS= read -r _f; do
+                        _t=\"\${_f}.tmp.relabel\"
+                        cat \"\$_f\" > \"\$_t\" 2>/dev/null && mv -f \"\$_t\" \"\$_f\" 2>/dev/null || rm -f \"\$_t\" 2>/dev/null
+                    done
+                    # --- ownership & mode --------------------------------
                     chown -R 0:0 '$_mount' 2>&1 || echo 'chown failed' >&2
-                    # 0666/0777 (world rw) — defense-in-depth so even if chown
-                    # silently failed for some files, every UID inside the
-                    # container can still read/write. Per-pod sandbox dir, so
-                    # there's no real attack surface.
                     find '$_mount' -type d -exec chmod 0777 {} \\; 2>&1 || true
                     find '$_mount' -type f -exec chmod 0666 {} \\; 2>&1 || true
                 else
