@@ -12,14 +12,20 @@ interrupt, and steer from a phone or LAN browser.
 - Safer LAN control surface before browser notifications and instructions land.
 - Stronger docs, contribution flow, and release checklist.
 
-## Implemented in 0.3 prep
+## Already shipped on `dev`
 
-- Local `dev` branch workflow.
-- `install-dev.sh` development-channel installer.
-- README and GitHub Pages install instructions for the dev channel.
-- Dashboard `ActivityState` / `ActivityDetail` enrichment in `GET /api/stats`.
-- Dashboard activity badge column.
-- CI runs on both `main` and `dev`.
+The `dev` channel, `install-dev.sh`, CI on both branches, and the first pass of
+dashboard `ActivityState` / `ActivityDetail` enrichment are already in. What
+follows is the work still needed to cut 0.3.0.
+
+## Non-goals for 0.3
+
+These are deliberately deferred so 0.3 stays shippable:
+
+- **No passkey login yet.** Token-based write protection is enough for 0.3; passkeys land in 0.5 (see `README.md` roadmap).
+- **No CLI inbox commands yet.** The `POST /api/pods/.../instructions` endpoint goes in, but `pod inbox` / `pod ask` / `pod instruct` are 0.4 work.
+- **No notification delivery.** 0.3 only stores subscriptions and exposes the question/instruction APIs. Web Push delivery rules ("pod became idle", "batch completed") are 0.4.
+- **No Docker backend, no scheduling, no remote control plane.** See the README "Non-goals" section.
 
 ## Must-have for 0.3.0
 

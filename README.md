@@ -17,21 +17,28 @@
 
 ---
 
-`pod` turns any Linux box with rootless Podman into a multi-tenant home for local coding agents — Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and anything else you wrap. Each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
+Running half a dozen local coding agents in parallel — Claude Code in one window, OpenCode in another, a Crush instance churning through a refactor — usually means six terminals, six workspaces stomping each other, and no idea which one is actually doing work. `pod` turns any Linux box with rootless Podman into a multi-tenant home for those agents: each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
 
-A small Go-backed web dashboard exposes the same control surface over the LAN.
+Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and Little-Coder. A small Go-backed web dashboard exposes the same control surface over the LAN.
+
+<div align="center">
+  <img src="static/screenshots/dashboard.png" alt="Pod Agents Manager dashboard" width="720" />
+</div>
+
+## Why pod-agents-manager?
+
+- **vs. running agents directly on the host** — every agent gets its own filesystem, its own `~/.config`, and its own workspace. A misbehaving agent can't trash another's state, and `pod delete` is a clean reset.
+- **vs. plain Docker / Docker Compose** — rootless Podman + Quadlet means no daemon, no socket, no root. Pods are real systemd user units, so they restart on boot, integrate with `journalctl`, and survive the parent shell exiting without bespoke supervisor scripts.
+- **vs. devcontainers** — devcontainers solve "one repo, one container." `pod` solves "one fleet of long-lived agents, many repos, one host," with batch prompting and a LAN dashboard on top.
+- **vs. Kubernetes / k3s** — no control plane, no YAML, no networking layer to debug. Single Bash file, single Go binary. Designed for one machine you already own.
 
 ## Highlights
 
-- **Single-file CLI, modular internals.** One `~/.pod_agents` Bash function loads numbered helper modules from `~/.pod_agents_config/lib/*.sh`. No daemons, no extra runtimes — Quadlet generates the systemd units, Podman runs them rootless under your user.
-- **Pluggable agents.** Drop a `<name>.sh` into `~/.pod_agents_config/agents/`; it's auto-discovered, gets its own image, and gains a CLI verb. Ships with Claude, OpenCode, Crush, Pi, Hermes, Nanocoder, Little-Coder.
-- **Composable Containerfile flavors and bases.** `bun`, `uv`, etc. layer onto the base image automatically. Pick `node:current-alpine` (default, fast) or `node:current-trixie-slim` (Debian, broader compatibility) per pod or via `pod base`.
-- **Batch prompting.** `pod batch prompts.txt` fans a list of prompts across every running pod, sequentially or `--concurrent`. Live progress, log tailing in `tmux`, stop/resume per batch.
-- **`tmux` grid view.** `pod tmux` opens a tiled grid with one pane per running pod — instant visual telemetry across the fleet.
-- **Native LAN dashboard.** `pod server start` runs a small static Go binary on the host (no nested containers, uses host Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, info, action, and create.
-- **Skills are first-class.** `~/.pod_agents_config/skills/` is read-only-mounted into every pod at `/srv/skills`, then symlinked into each agent's expected path. Update once, every agent sees it.
-- **Self-diagnosing.** `pod doctor` reports podman + systemd readiness, lib/agents/flavors layout, env, port + endpoint reachability — so a misconfigured host fails fast with a clear hint instead of deep inside `pod start`.
-- **Persistence done right.** Per-instance workspaces live at `~/Developer/<agent>-pods/<instance>/`. `remove` keeps the data; `delete` wipes it.
+- **Single-file CLI, no daemons.** One `~/.pod_agents` Bash function loads numbered helper modules from `~/.pod_agents_config/lib/*.sh`. Quadlet generates the systemd units, Podman runs them rootless under your user.
+- **Pluggable agents and composable flavors.** Drop a `<name>.sh` into `~/.pod_agents_config/agents/` and it's auto-discovered, gets its own image, gains a CLI verb. Containerfile flavors (`bun`, `uv`, …) and bases (`alpine`, `trixie-slim`) layer on automatically.
+- **Batch prompting and `tmux` grid.** `pod batch prompts.txt` fans a list of prompts across every running pod, sequentially or `--concurrent`. `pod tmux` opens a tiled grid with one pane per running pod for instant visual telemetry.
+- **Native LAN dashboard.** `pod server start` runs a static Go binary on the host (no nested containers, uses host Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, info, action, and create.
+- **Persistence done right.** Per-instance workspaces live at `~/Developer/<agent>-pods/<instance>/`. `remove` keeps the data; `delete` wipes it. Skills under `~/.pod_agents_config/skills/` are read-only-mounted into every pod, so updating once propagates to every agent.
 
 ## Architecture
 
@@ -133,6 +140,34 @@ pod delete pi dev                     # stop + remove the workspace
 
 Run `pod` with no args for an interactive menu.
 
+## Showcase: a Friday-afternoon refactor run
+
+A worked example of what the fleet is for:
+
+```bash
+# Spin up four Pi pods, one per repo area you want refactored in parallel.
+pod start pi auth
+pod start pi billing
+pod start pi reports
+pod start pi web
+
+# Open the grid so you can watch all four agents at once.
+pod tmux
+
+# Bring up the LAN dashboard so you can check progress from your phone.
+pod server start
+
+# Fan out a list of refactor prompts. --concurrent runs one prompt per pod
+# in parallel; without it, prompts go round-robin.
+pod batch pi refactor-prompts.txt --concurrent
+
+# Walk away. The dashboard shows running / idle per pod, batch stats live in
+# `pod batch stats`, and runners are detached with nohup so closing your
+# laptop doesn't kill them.
+```
+
+When you come back, idle pods are visible at a glance, completed batches have logs and result summaries on disk under `~/.pod_agents_config/batch/<id>/`, and each pod's persistent workspace at `~/Developer/pi-pods/<instance>/` still has every change the agent made — ready for `git diff`.
+
 ## Command reference
 
 ```
@@ -145,6 +180,9 @@ Interaction    pod join | enter | it [agent] [instance]
                pod config | tmux [instance]
 Batch          pod batch [agent [instance]] <prompts.txt> [--concurrent]
                pod batch tmux | stats | list | stop [id]
+Inbox          pod inbox [agent instance] [--json|--clear]
+               pod instruct <agent> <instance> <instruction...>
+               pod ask <agent> <instance> "Question?" --option A --option B
 Dashboard      pod server start | stop | restart | status | logs | build
 Diagnostics    pod doctor
 Defaults       pod base <alpine|trixie-slim|...>
@@ -202,6 +240,9 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /api/stats` | Cached `podman stats --all --no-stream` JSON, refreshed every 3s |
 | `GET /api/info` | Hostname, LAN IPs, server time |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
+| `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
+| `POST /api/instruct` | Queue a follow-up instruction into `~/.pod_agents_config/inbox/` |
+| `POST /api/pods/{agent}/{instance}/instructions` | REST-shaped alias for queuing pod instructions |
 | `POST /api/action` | `start \| stop \| restart \| delete \| remove` an existing pod |
 | `POST /api/create` | Create a brand-new pod from agent + instance + flavor + volumes + base |
 
@@ -228,11 +269,33 @@ pod batch stop <id>                         # SIGTERM all runners for a batch
 
 State lives at `~/.pod_agents_config/batch/<id>/` (input copy, meta, runners, pids, per-pod progress + logs, completion markers). Runners are detached with `nohup` and survive the parent shell exiting.
 
+## Agent inbox
+
+0.4 introduces a small local inbox per pod. Entries are JSONL files under
+`~/.pod_agents_config/inbox/<agent>-<instance>.jsonl`, so the CLI, dashboard,
+and future notification workers share one queue without a database.
+
+```bash
+pod instruct pi dev "Please inspect the failing test and suggest a fix"
+pod ask pi dev "Should the app be red or blue?" --option red --option blue
+pod inbox pi dev
+pod inbox pi dev --json
+pod inbox pi dev --clear
+```
+
+The dashboard can queue an instruction for an idle pod from the Actions column.
+This is intentionally just the queueing layer: agents do not automatically
+consume inbox entries yet, which keeps 0.4 safe while the notification and
+human-in-the-loop workflow matures.
+
 ## Roadmap
 
 Pod Agents Manager is moving toward a small, reliable orchestration layer for
 local agent fleets: still shell-native, still rootless-first, but much better at
 showing what agents are doing and letting you steer them from the dashboard.
+The arc through 1.0 is dashboard awareness (0.3, shipped) →
+human-in-the-loop (0.4) → safe sharing (0.5) → polish & demoability (0.6) →
+benchmark suite (0.7) → public 1.0.
 
 ### 0.3 — dashboard awareness and notification foundations
 
@@ -256,7 +319,7 @@ showing what agents are doing and letting you steer them from the dashboard.
 - Add a batch dashboard with progress, ETA, logs, stop controls, and result summaries.
 - Support per-pod notes, tags, and favorite workspaces.
 
-### 0.5 — safer multi-user and remote operations
+### 0.5 — auth and safe LAN sharing
 
 - Add passkey-native dashboard login with SimpleWebAuthn:
   - `@simplewebauthn/browser` in the dashboard/PWA
@@ -264,27 +327,67 @@ showing what agents are doing and letting you steer them from the dashboard.
   - local credential storage under `~/.pod_agents_config/server/`
   - no external identity provider required
 - Keep `pod server token rotate` as a recovery/bootstrap path for headless hosts and first-time passkey setup.
-- Add read-only and operator modes for LAN sharing.
-- Add exportable diagnostics bundles for bug reports.
-- Add stronger `pod status --json` and `pod doctor --json` APIs.
-- Improve update/release tooling: changelog generation, preflight checks, and rollback hints.
-- Add more agent plugin examples and a compatibility matrix for common local inference servers.
+- Add read-only and operator roles so a viewer link can be shared without granting `delete`/`create`.
+- Add an audit log for every `POST /api/action` and `POST /api/create` call: who, when, which pod, what changed.
 
-### 0.6 — broader container backend support
+### 0.6 — polish and demoability
 
-- Explore Docker support as an optional backend while keeping Podman + Quadlet as the primary, best-supported path.
-- Define a backend interface for lifecycle, stats, logs, exec, port publishing, and volume mounts.
-- Support Docker Compose or systemd-managed Docker units only if they can preserve the project’s core goals: per-pod isolation, persistent workspaces, simple upgrades, and clear diagnostics.
-- Document feature differences between Podman and Docker instead of pretending every backend behaves identically.
+Everything that turns the working fleet manager into a product you can demo
+cold to a stranger.
 
-### Later ideas
+- **Pod templates** for common workflows: web-app coding, repo triage, research, batch refactors. `pod start --from-template <name>`.
+- **Mobile-first PWA polish:** install prompt, offline shell, notification center, quick actions.
+- **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
+- **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.
 
-- Mobile-first PWA polish: install prompt, offline shell, notification center, and quick actions.
-- Policy presets for model, endpoint, permissions, workspace mount mode, and allowed tools.
-- Pod templates for common workflows such as web app coding, repo triage, research, and batch refactors.
-- Lightweight scheduling: start pods, run batches, or send prompts at planned times.
-- Optional metrics history so the dashboard can show agent activity over time.
-- Plugin registry conventions for community agents, flavors, volume bundles, and skills.
+### 0.7 — benchmark suite and agent comparison
+
+Objective, reproducible numbers for "which local agent is actually good at
+which task." This is the milestone that turns the project's pluggable-agent
+story into hard data — and the strongest possible hook for the 1.0 launch
+post.
+
+- **Pluggable benchmark tasks** under `~/.pod_agents_config/benchmarks/<name>/`, same drop-in convention as agents and flavors. Each task defines a prompt, success criteria, optional input files, and an expected artifact (e.g. `index.html`).
+- **A canonical starter task:** "write a single-file portfolio app in one HTML file." Self-contained, judgeable, runnable on any agent.
+- **Configurable judge LLM.** The judge is an explicit config knob (`POD_BENCH_JUDGE_MODEL`, `POD_BENCH_JUDGE_BASE_URL`) — no hidden dependency on a specific provider, and the judge's verdict is stored alongside the run so disagreements can be re-judged later.
+- **Fan across the fleet** using the existing batch infrastructure. `pod bench run <task>` runs the task on every configured agent in parallel; results are comparable side-by-side.
+- **Per-run metrics:**
+  - Wall-clock time to completion.
+  - **Input tokens split into cached vs. new.** This matters because mlx, vLLM, llama.cpp, etc. cache prefix tokens — a naive total would unfairly penalize agents with longer-but-stable system prompts. The cached/new split is the only fair way to compare token efficiency across agents.
+  - Output tokens.
+  - Judge score and rationale.
+- **CLI surface:** `pod bench list`, `pod bench run <task> [agent]`, `pod bench results <task>`, `pod bench export <task>` (CSV/JSON for sharing).
+- **Dashboard view:** comparative results table per task, sortable by score, time, and tokens.
+- Results stored under `~/.pod_agents_config/benchmarks/<task>/runs/<id>/` so they're diffable, versionable, and easy to share in a PR or blog post.
+
+### 1.0 — stable public release
+
+1.0 is consolidation, not new features. Concrete commitments:
+
+- **Stable CLI surface.** `pod <action> [agent] [instance] [flavor] [volumes] [base]` won't break in any 1.x release; new behavior arrives via new flags or subcommands.
+- **Stable plugin contract.** `agent_build_containerfile`, `agent_generate_config`, and the `AGENT_*` env vars are frozen. Plugins written for 1.0 keep working through 1.x.
+- **Stable on-disk layout.** `~/.pod_agents_config/` and `~/Developer/<agent>-pods/<instance>/` paths are guaranteed; `pod self-update` migrates older layouts forward.
+- **JSON everywhere.** `pod status --json` and `pod doctor --json` so the dashboard never has to scrape Podman text output and external tools have a stable contract.
+- **Diagnostics bundle.** `pod doctor --bundle` exports a redacted tarball for bug reports.
+- **Documented upgrade path** from any 0.x to 1.0, with `pod doctor` flagging anything that needs manual attention.
+- **A real demo.** Recorded GIFs of the dashboard, `tmux` grid, and a batch run; a sample-prompts repo; the Friday-refactor showcase reproducible in five commands; a published benchmark scorecard from 0.7 covering at least three agents on the canonical task.
+- Public announcement on r/selfhosted, r/LocalLLaMA, r/commandline once the above are in place.
+
+### Post-1.0 (1.x and beyond)
+
+Deferred deliberately so 1.0 freezes a coherent surface:
+
+- **Inter-pod messaging.** Pods drop structured messages into each other's inboxes — natural extension of 0.4's local-file inbox, but a new capability that 1.0 shouldn't add.
+- **Metrics history.** Persist activity / CPU / memory over time so the dashboard can show trend graphs.
+- **Plugin registry conventions** for community agents, flavors, volume bundles, and skills.
+- **Compatibility matrix** for local inference servers (llama.cpp, vLLM, LM Studio, Ollama) — docs work, can land any time it's useful.
+- **Release tooling** improvements: changelog generation, preflight checks, rollback hints.
+
+### Non-goals
+
+- **No Docker backend.** Rootless Podman + Quadlet is the identity of the project. Supporting Docker would double the test matrix and force a lowest-common-denominator API. If Docker support ever happens, it'll be a sibling project, not a backend toggle.
+- **No built-in scheduling.** Cron, systemd timers, and `at` already exist; wrapping them adds surface area without value.
+- **No remote control plane.** This is a single-host fleet manager. Multi-host orchestration is a different product.
 
 ## Development & contributing
 
