@@ -22,6 +22,33 @@
         fi
     fi
 
+    # Keep user units alive after SSH logout. Without linger, systemd --user
+    # can stop all pod services when the last session exits, which looks like
+    # "containers randomly die after a few minutes" even with tmux inside.
+    # One-time check + best-effort auto-fix.
+    if [ ! -e "$config_dir_root/.linger-checked" ] && command -v loginctl >/dev/null 2>&1; then
+        local _pod_user _linger_state
+        _pod_user="$(id -un 2>/dev/null || true)"
+        _linger_state=""
+        if [ -n "$_pod_user" ]; then
+            _linger_state=$(loginctl show-user "$_pod_user" -p Linger --value 2>/dev/null || true)
+        fi
+        if [ "$_linger_state" = "yes" ]; then
+            touch "$config_dir_root/.linger-checked"
+        elif [ -n "$_pod_user" ]; then
+            echo -e "\033[36mEnabling linger for user '$_pod_user' to keep pods running after logout...\033[0m"
+            loginctl enable-linger "$_pod_user" >/dev/null 2>&1 || true
+            _linger_state=$(loginctl show-user "$_pod_user" -p Linger --value 2>/dev/null || true)
+            if [ "$_linger_state" = "yes" ]; then
+                echo -e "\033[32mLinger enabled: user services remain active without an SSH session.\033[0m"
+                touch "$config_dir_root/.linger-checked"
+            else
+                echo -e "\033[33mCould not enable linger automatically.\033[0m"
+                echo -e "\033[33mRun manually on the host: sudo loginctl enable-linger $_pod_user\033[0m"
+            fi
+        fi
+    fi
+
     # Auto-scaffold 'none' if the flavors directory is empty
     if [ -z "$(ls -A "$config_dir_flavors" 2>/dev/null)" ]; then
         echo "# Base node image only; no extra flavors added." > "$config_dir_flavors/none.containerfile"
