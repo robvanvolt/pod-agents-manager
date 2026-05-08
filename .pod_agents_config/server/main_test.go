@@ -33,3 +33,31 @@ func TestFirstPercent(t *testing.T) {
 		t.Fatalf("got %v, want 1.23", got)
 	}
 }
+
+func TestPodInstructionPath(t *testing.T) {
+	agent, instance, ok := parsePodInstructionPath("/api/pods/little-coder/dev/instructions")
+	if !ok {
+		t.Fatal("expected path to parse")
+	}
+	if agent != "little-coder" || instance != "dev" {
+		t.Fatalf("got %q/%q, want little-coder/dev", agent, instance)
+	}
+}
+
+func TestAppendAndReadInboxEntry(t *testing.T) {
+	root := t.TempDir()
+	_, err := appendInboxEntry(root, "instruction", "pi", "dev", "test", "check this", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := readInboxEntries(root, "pi", "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if entries[0].Body != "check this" || entries[0].Status != "pending" {
+		t.Fatalf("unexpected entry: %#v", entries[0])
+	}
+}

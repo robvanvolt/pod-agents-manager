@@ -1,5 +1,5 @@
     if [ "$#" -eq 0 ]; then
-        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "server" "base" "cache-clean" "doctor" "uninstall" "quit")
+        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "uninstall" "quit")
         local selected_action=""
         
         while true; do
@@ -83,6 +83,43 @@
                             ;;
                     esac
                 done
+                ;;
+            inbox)
+                local prompt_agent="" prompt_instance=""
+                read -p "Agent (blank for all inboxes): " prompt_agent
+                if [ -n "$prompt_agent" ]; then
+                    read -p "Instance: " prompt_instance
+                    _pod_agents_main inbox "$prompt_agent" "$prompt_instance"
+                else
+                    _pod_agents_main inbox --all
+                fi
+                return $?
+                ;;
+            instruct)
+                local prompt_agent="" prompt_instance="" prompt_instruction=""
+                prompt_agent="$(pick_agent_required)" || { echo "Action canceled."; return 0; }
+                read -p "Instance: " prompt_instance
+                read -p "Instruction: " prompt_instruction
+                _pod_agents_main instruct "$prompt_agent" "$prompt_instance" "$prompt_instruction"
+                return $?
+                ;;
+            ask)
+                local prompt_agent="" prompt_instance="" prompt_question="" prompt_options=""
+                prompt_agent="$(pick_agent_required)" || { echo "Action canceled."; return 0; }
+                read -p "Instance: " prompt_instance
+                read -p "Question: " prompt_question
+                read -p "Options (comma-separated): " prompt_options
+                local _ask_args=()
+                local _opt
+                local IFS=','
+                for _opt in $prompt_options; do
+                    _opt="${_opt#"${_opt%%[![:space:]]*}"}"
+                    _opt="${_opt%"${_opt##*[![:space:]]}"}"
+                    [ -n "$_opt" ] && _ask_args+=("--option" "$_opt")
+                done
+                unset IFS
+                _pod_agents_main ask "$prompt_agent" "$prompt_instance" "$prompt_question" "${_ask_args[@]}"
+                return $?
                 ;;
             tmux)
                 echo -e "\033[36mEnter instance name for grid view (leave blank for the first pod of all agents):\033[0m"
