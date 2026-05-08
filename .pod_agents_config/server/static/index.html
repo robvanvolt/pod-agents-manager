@@ -154,11 +154,13 @@
         const cpu = parsePct(c.CPU || c.CPUPerc);
         const mem = parsePct(c.MemPerc);
         const id = (c.ID || c.ContainerID || '').slice(0, 12);
+        const canInstruct = String(c.ActivityState || '').toLowerCase() === 'idle';
         const actions = (agent && instance) ? `
           <div class="inline">
             <button onclick="sendAction('restart','${agent}','${instance}')">restart</button>
             <button onclick="sendAction('stop','${agent}','${instance}')">stop</button>
             <button onclick="sendAction('start','${agent}','${instance}')">start</button>
+            <button ${canInstruct ? '' : 'disabled title="pod is not idle"'} onclick="sendInstruction('${agent}','${instance}')">instruct</button>
             <button class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
           </div>` : '';
         return `<tr>
@@ -191,6 +193,23 @@
         const text = await res.text();
         showToast(res.ok ? `${op} ${agent} ${instance}` : text, !res.ok);
         fetchStats();
+      } catch (err) {
+        showToast('Network error: ' + err, true);
+      }
+    }
+
+    async function sendInstruction(agent, instance) {
+      const message = prompt(`Instruction for ${agent}-${instance}`);
+      if (!message || !message.trim()) return;
+      const formData = new URLSearchParams();
+      formData.append('agent', agent);
+      formData.append('instance', instance);
+      formData.append('message', message.trim());
+      try {
+        const res = await fetch('/api/instruct', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch (_) { data = { error: text }; }
+        showToast(res.ok ? `Queued instruction ${data.entry?.id || ''}` : (data.error || text), !res.ok);
       } catch (err) {
         showToast('Network error: ' + err, true);
       }

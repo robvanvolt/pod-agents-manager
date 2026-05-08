@@ -552,6 +552,46 @@ t_helpers_unit() {
     return "$rc"
 }
 
+t_inbox_instruct_queues() {
+    local sandbox out inbox_file
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" instruct pi dev "check the diff" 2>&1)
+    inbox_file="$sandbox/.pod_agents_config/inbox/pi-dev.jsonl"
+    if [ ! -f "$inbox_file" ]; then
+        echo "  inbox file missing; output was: $out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"type":"instruction"' "$inbox_file" || ! grep -q '"body":"check the diff"' "$inbox_file"; then
+        echo "  inbox entry did not contain expected instruction" >&2
+        cat "$inbox_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
+t_inbox_ask_queues_options() {
+    local sandbox inbox_file
+    sandbox=$(setup_sandbox)
+    run_pod_in_sandbox "$sandbox" ask pi dev "Use red or blue?" --option red --option blue >/dev/null 2>&1
+    inbox_file="$sandbox/.pod_agents_config/inbox/pi-dev.jsonl"
+    if [ ! -f "$inbox_file" ]; then
+        echo "  inbox file missing" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"type":"question"' "$inbox_file" || ! grep -q '"options":\["red","blue"\]' "$inbox_file"; then
+        echo "  inbox entry did not contain expected question/options" >&2
+        cat "$inbox_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 
 echo "==> pod-agents-manager test suite"
@@ -602,6 +642,8 @@ run_test "api-key flag: --api-key=VAL parses"     t_api_key_hyphen_eq_form_parse
 run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
+run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
+run_test "inbox: ask queues options"           t_inbox_ask_queues_options
 
 echo
 echo "==> Summary: $passes passed, $fails failed"

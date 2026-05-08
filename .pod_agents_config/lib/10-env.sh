@@ -217,7 +217,7 @@ EOF
     local initial_action="${1:-}"
     local should_auto_config=1
     case "$initial_action" in
-        config|-h|--help|help|-v|--version|version|doctor)
+        config|-h|--help|help|-v|--version|version|doctor|inbox|instruct|ask)
             should_auto_config=0
             ;;
     esac

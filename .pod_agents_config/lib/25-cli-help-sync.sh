@@ -26,6 +26,9 @@ Actions:
   interaction  join enter it tmux config
   images       prebuild update self-update cache-clean base
   batch        batch [log [id]|tmux|stats|list|stop <id>|...]
+  inbox        inbox [agent instance] [--json|--clear]
+               instruct <agent> <instance> <instruction...>
+               ask <agent> <instance> "Question?" --option A --option B
   server       server {start|stop|restart|status|logs|build}
   diagnostics  doctor
   uninstall    uninstall
@@ -42,6 +45,9 @@ Examples:
   ${_cmd} restart opencode dev --ports 3000:3000
   ${_cmd} batch prompts.txt --concurrent
   ${_cmd} batch log
+  ${_cmd} instruct pi dev "Please inspect the latest diff"
+  ${_cmd} ask pi dev "Use red or blue?" --option red --option blue
+  ${_cmd} inbox pi dev
   ${_cmd} server start
   ${_cmd} uninstall
   ${_cmd} --version
