@@ -228,6 +228,59 @@ pod batch stop <id>                         # SIGTERM all runners for a batch
 
 State lives at `~/.pod_agents_config/batch/<id>/` (input copy, meta, runners, pids, per-pod progress + logs, completion markers). Runners are detached with `nohup` and survive the parent shell exiting.
 
+## Roadmap
+
+Pod Agents Manager is moving toward a small, reliable orchestration layer for
+local agent fleets: still shell-native, still rootless-first, but much better at
+showing what agents are doing and letting you steer them from the dashboard.
+
+### 0.3 — dashboard awareness and notification foundations
+
+- Show whether each pod appears **idle**, **running**, or **unknown** in the LAN dashboard.
+- Add a normalized pod API with agent, instance, image, ports, workspace path, service state, container state, activity state, and last refresh time.
+- Add a server-sent events stream so the dashboard can update without constant polling.
+- Add basic write protection for dashboard actions before expanding the API surface.
+- Prepare PWA notification support: browser subscription storage, test notifications, and a notification-ready event model.
+- Add the first question/instruction APIs:
+  - ask a multiple-choice question such as “Should the app be red or blue?”
+  - collect the answer from a notification-enabled dashboard/PWA
+  - queue new instructions for an idle pod
+- Test release candidates through the `dev` channel on a disposable Linux host before promoting to `main`.
+
+### 0.4 — agent inbox and human-in-the-loop workflows
+
+- Add an instruction inbox per pod, backed by simple local files first.
+- Add CLI commands such as `pod inbox`, `pod ask`, and `pod instruct`.
+- Let the dashboard send follow-up instructions to idle pods.
+- Add notification rules for “pod became idle”, “batch completed”, “agent asks a question”, and “pod failed”.
+- Add a batch dashboard with progress, ETA, logs, stop controls, and result summaries.
+- Support per-pod notes, tags, and favorite workspaces.
+
+### 0.5 — safer multi-user and remote operations
+
+- Add dashboard auth/token management with `pod server token rotate`.
+- Add read-only and operator modes for LAN sharing.
+- Add exportable diagnostics bundles for bug reports.
+- Add stronger `pod status --json` and `pod doctor --json` APIs.
+- Improve update/release tooling: changelog generation, preflight checks, and rollback hints.
+- Add more agent plugin examples and a compatibility matrix for common local inference servers.
+
+### 0.6 — broader container backend support
+
+- Explore Docker support as an optional backend while keeping Podman + Quadlet as the primary, best-supported path.
+- Define a backend interface for lifecycle, stats, logs, exec, port publishing, and volume mounts.
+- Support Docker Compose or systemd-managed Docker units only if they can preserve the project’s core goals: per-pod isolation, persistent workspaces, simple upgrades, and clear diagnostics.
+- Document feature differences between Podman and Docker instead of pretending every backend behaves identically.
+
+### Later ideas
+
+- Mobile-first PWA polish: install prompt, offline shell, notification center, and quick actions.
+- Policy presets for model, endpoint, permissions, workspace mount mode, and allowed tools.
+- Pod templates for common workflows such as web app coding, repo triage, research, and batch refactors.
+- Lightweight scheduling: start pods, run batches, or send prompts at planned times.
+- Optional metrics history so the dashboard can show agent activity over time.
+- Plugin registry conventions for community agents, flavors, volume bundles, and skills.
+
 ## Development & contributing
 
 Source layout:
