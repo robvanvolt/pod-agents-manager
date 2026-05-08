@@ -66,7 +66,13 @@ The instruction queue can start as JSONL files under
 
 ## Nice-to-have
 
-- `pod server token rotate` for LAN dashboard credentials.
+- Passkey-native dashboard login in the 0.5 line, using
+  `@simplewebauthn/browser` in the dashboard/PWA and
+  `@simplewebauthn/server` for registration/authentication verification, with
+  credentials stored locally under `~/.pod_agents_config/server/` and no
+  external identity provider required.
+- `pod server token rotate` as a recovery/bootstrap path for headless hosts and
+  first-time passkey setup.
 - `pod status --json` so the Go dashboard does not need to infer everything
   from Podman output.
 - Batch dashboard page with progress, logs, ETA, and stop controls.

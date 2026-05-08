@@ -258,7 +258,12 @@ showing what agents are doing and letting you steer them from the dashboard.
 
 ### 0.5 — safer multi-user and remote operations
 
-- Add dashboard auth/token management with `pod server token rotate`.
+- Add passkey-native dashboard login with SimpleWebAuthn:
+  - `@simplewebauthn/browser` in the dashboard/PWA
+  - `@simplewebauthn/server` for registration and authentication verification
+  - local credential storage under `~/.pod_agents_config/server/`
+  - no external identity provider required
+- Keep `pod server token rotate` as a recovery/bootstrap path for headless hosts and first-time passkey setup.
 - Add read-only and operator modes for LAN sharing.
 - Add exportable diagnostics bundles for bug reports.
 - Add stronger `pod status --json` and `pod doctor --json` APIs.
