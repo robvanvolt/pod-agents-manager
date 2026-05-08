@@ -111,6 +111,29 @@ button:hover { border-color: rgba(104,225,253,.48); color: var(--brand); }
 
 .inline { display: inline-flex; gap: 4px; flex-wrap: wrap; }
 
+.activity-badge {
+    display: inline-flex; align-items: center; gap: .38rem;
+    min-width: 5.6rem;
+    border: 1px solid rgba(148,163,184,.22);
+    border-radius: 999px;
+    padding: .22rem .55rem;
+    color: #dbeafe;
+    background: rgba(15,23,42,.62);
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.activity-badge span {
+    width: .45rem; height: .45rem; border-radius: 999px;
+    background: #94a3b8;
+    box-shadow: 0 0 0 3px rgba(148,163,184,.12);
+}
+.activity-badge.running { border-color: rgba(52,211,153,.45); color: #bbf7d0; }
+.activity-badge.running span { background: #34d399; box-shadow: 0 0 0 3px rgba(52,211,153,.14); }
+.activity-badge.idle { border-color: rgba(104,225,253,.38); color: #bae6fd; }
+.activity-badge.idle span { background: var(--brand); box-shadow: 0 0 0 3px rgba(104,225,253,.14); }
+.activity-badge.unmanaged { opacity: .62; }
+
 .heat-wrap { position: relative; min-height: 1.2em; min-width: 60px; padding: 2px 6px; }
 .heat-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; }
 .heat-text { position: relative; z-index: 1; }

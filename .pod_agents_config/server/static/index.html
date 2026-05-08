@@ -30,12 +30,12 @@
   <table>
     <thead>
       <tr>
-        <th>ID</th><th>Name</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
+        <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
         <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="stats-body">
-      <tr><td colspan="9">Loading stats…</td></tr>
+      <tr><td colspan="10">Loading stats…</td></tr>
     </tbody>
   </table>
   </div>
@@ -99,6 +99,12 @@
       if (i || o) return `${i ? fmtBytes(c[i]) : '-'} / ${o ? fmtBytes(c[o]) : '-'}`;
       return c[fallback] || '-';
     };
+    const activityBadge = (state, detail) => {
+      const safeState = String(state || 'unknown').toLowerCase();
+      const label = safeState === 'running' ? 'running' : safeState === 'idle' ? 'idle' : safeState;
+      const title = String(detail || '').replace(/"/g, '&quot;');
+      return `<span class="activity-badge ${safeState}" title="${title}"><span></span>${label}</span>`;
+    };
 
     function setChip(id, value) {
       const chip = document.getElementById(id);
@@ -137,14 +143,14 @@
     function renderTable(containers) {
       const tbody = document.getElementById('stats-body');
       if (!containers || containers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9">No containers running</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10">No containers running</td></tr>';
         return;
       }
       const html = containers.map(c => {
         const name = c.Name || '-';
         const dash = name.indexOf('-');
-        const agent = dash > 0 ? name.slice(0, dash) : '';
-        const instance = dash > 0 ? name.slice(dash + 1) : '';
+        const agent = c.PodAgent || (dash > 0 ? name.slice(0, dash) : '');
+        const instance = c.PodInstance || (dash > 0 ? name.slice(dash + 1) : '');
         const cpu = parsePct(c.CPU || c.CPUPerc);
         const mem = parsePct(c.MemPerc);
         const id = (c.ID || c.ContainerID || '').slice(0, 12);
@@ -158,6 +164,7 @@
         return `<tr>
           <td><code>${id}</code></td>
           <td><b>${name}</b></td>
+          <td>${activityBadge(c.ActivityState, c.ActivityDetail)}</td>
           <td>${heatCell(cpu, fmtPct(c.CPU || c.CPUPerc))}</td>
           <td>${memUsage(c)}</td>
           <td>${heatCell(mem, fmtPct(c.MemPerc))}</td>

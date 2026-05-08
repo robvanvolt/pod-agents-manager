@@ -47,6 +47,8 @@ t_syntax_libs() {
 
 t_syntax_install() { bash -n install.sh; }
 
+t_syntax_install_dev() { bash -n install-dev.sh; }
+
 # ----- 2. Shellcheck --------------------------------------------------------
 # SC2168 ('local' is only valid in functions) is a known false-positive for
 # the lib files: they are sourced INSIDE the pod() function, which shellcheck
@@ -73,7 +75,7 @@ t_shellcheck_libs() {
 }
 
 t_shellcheck_install() {
-    shellcheck -s bash --severity=error install.sh
+    shellcheck -s bash --severity=error install.sh install-dev.sh
 }
 
 # ----- 3. Lib-loader contract ----------------------------------------------
@@ -559,11 +561,12 @@ echo
 run_test "syntax: .pod_agents"                 t_syntax_entrypoint
 run_test "syntax: lib/*.sh"                    t_syntax_libs
 run_test "syntax: install.sh"                  t_syntax_install
+run_test "syntax: install-dev.sh"              t_syntax_install_dev
 
 if t_shellcheck_available; then
     run_test "shellcheck: .pod_agents"         t_shellcheck_entrypoint
     run_test "shellcheck: lib/*.sh"            t_shellcheck_libs
-    run_test "shellcheck: install.sh"          t_shellcheck_install
+    run_test "shellcheck: installers"          t_shellcheck_install
 else
     printf '\033[33m[SKIP]\033[0m shellcheck not installed; skipping lint tests\n'
 fi

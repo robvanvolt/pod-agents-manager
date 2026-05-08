@@ -20,6 +20,19 @@ bash tests/run.sh
 CI runs the same suite on every push and pull request via
 [`.github/workflows/tests.yml`](.github/workflows/tests.yml).
 
+## Branching model
+
+Maintainers use three lanes:
+
+- `main` is the stable install channel.
+- `dev` is the integration branch for small fixes and release-prep changes.
+- Named feature branches, such as `feature/pwa-notifications`, are for larger
+  work that should be tested and reviewed before it lands in `dev`.
+
+The expected flow is feature branch -> `dev` -> `main`. Keep user-facing release
+notes and docs current on `dev`, then bump `version.conf` only when promoting to
+`main`.
+
 ## Source layout
 
 ```

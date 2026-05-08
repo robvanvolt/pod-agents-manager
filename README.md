@@ -97,6 +97,19 @@ bash ./install.sh
 exec bash -l
 ```
 
+Development channel install from the `dev` branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/dev/install-dev.sh | bash
+exec bash -l
+
+pod doctor
+```
+
+Use the dev channel for testing the next release before it is promoted to
+`main`. It writes the same `~/.pod_agents` and `~/.pod_agents_config` managed
+files as the regular installer, but fetches `POD_AGENTS_REF=dev`.
+
 Tab-completion is registered automatically. Type `pod ` and hit `<Tab>`.
 
 Upgrade later without touching your `.env` or custom plugins:
@@ -192,6 +205,11 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `POST /api/action` | `start \| stop \| restart \| delete \| remove` an existing pod |
 | `POST /api/create` | Create a brand-new pod from agent + instance + flavor + volumes + base |
 
+`GET /api/stats` also adds `ActivityState` and `ActivityDetail` to managed pods
+so the dashboard can show whether an agent looks idle or busy. The first-pass
+heuristic checks CPU activity and the foreground tmux command in the pod's
+`bot` session.
+
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 
 ## Batch processing
@@ -228,7 +246,15 @@ bash tests/run.sh
 
 The suite covers `bash -n` syntax, `shellcheck` errors, the lib loader contract (numeric prefixes + sentinel exit codes), install/self-update regression guards, sandboxed smoke tests for `--help` / `--version` / `doctor`, helper-function unit tests, and a regression check that `pod --version` matches `version.conf`.
 
+The proposed 0.3 plan lives in [docs/ROADMAP-0.3.md](docs/ROADMAP-0.3.md).
+
 **Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (e.g. `0.2.2n` → `0.2.2o`), committing, and pushing is the entire release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
+
+**Branching.** Keep `main` as the stable install channel, use `dev` for small
+release-prep changes, and open named feature branches for larger work such as
+PWA notifications or new orchestration APIs. Merge large branches into `dev`
+first, test on a disposable Linux host, then fast-forward or PR `dev` into
+`main` for release.
 
 PRs welcome for additional flavors, agents, skills, and bug fixes.
 

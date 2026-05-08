@@ -565,6 +565,10 @@ p {
   padding: 1.5rem;
 }
 
+.dev-channel-card {
+  margin-top: 1rem;
+}
+
 .command-list {
   display: grid;
   gap: 0.8rem;

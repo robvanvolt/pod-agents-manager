@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,14 +12,17 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 var (
-	statsCache []byte
-	cacheMutex sync.RWMutex
+	statsCache           []byte
+	cacheMutex           sync.RWMutex
+	activityBusyCPUPct   = 1.0
+	activityProbeTimeout = 900 * time.Millisecond
 )
 
 func main() {
@@ -321,14 +325,148 @@ func updateStatsLoop() {
 		}
 
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		jsonArray := "[]"
+		containers := []map[string]any{}
+		root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 		if len(lines) > 0 && lines[0] != "" {
-			jsonArray = "[" + strings.Join(lines, ",") + "]"
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				var row map[string]any
+				if err := json.Unmarshal([]byte(line), &row); err != nil {
+					log.Printf("podman stats json parse failed: %v", err)
+					continue
+				}
+				enrichActivity(row, root)
+				containers = append(containers, row)
+			}
+		}
+
+		payload, err := json.Marshal(containers)
+		if err != nil {
+			log.Printf("stats json encode failed: %v", err)
+			payload = []byte("[]")
 		}
 
 		cacheMutex.Lock()
-		statsCache = []byte(jsonArray)
+		statsCache = payload
 		cacheMutex.Unlock()
 		time.Sleep(3 * time.Second)
 	}
+}
+
+func enrichActivity(row map[string]any, root string) {
+	name := firstString(row, "Name", "Container", "ContainerName")
+	if name == "" {
+		row["ActivityState"] = "unknown"
+		row["ActivityDetail"] = "missing container name"
+		return
+	}
+	agent, instance, ok := splitManagedPodName(root, name)
+	if !ok {
+		row["ActivityState"] = "unmanaged"
+		row["ActivityDetail"] = "not a pod-agents-manager container"
+		return
+	}
+	row["PodAgent"] = agent
+	row["PodInstance"] = instance
+
+	cpu := firstPercent(row, "CPU", "CPUPerc")
+	state, detail := detectActivity(name, cpu)
+	row["ActivityState"] = state
+	row["ActivityDetail"] = detail
+}
+
+func detectActivity(container string, cpuPct float64) (string, string) {
+	if cpuPct >= activityBusyCPUPct {
+		return "running", fmt.Sprintf("cpu %.2f%%", cpuPct)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), activityProbeTimeout)
+	defer cancel()
+
+	script := `if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}"; else printf 'no-session\n'; fi`
+	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return "unknown", "activity probe timed out"
+	}
+	if err != nil {
+		return "unknown", strings.TrimSpace(stripANSI(string(out)))
+	}
+
+	command := strings.TrimSpace(string(out))
+	switch command {
+	case "", "no-session":
+		return "idle", "no active agent tmux session"
+	case "bash", "sh", "ash", "zsh", "fish", "tmux":
+		return "idle", "agent pane is waiting at a shell"
+	default:
+		return "running", "foreground command: " + command
+	}
+}
+
+func firstString(row map[string]any, keys ...string) string {
+	for _, key := range keys {
+		v, ok := row[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case string:
+			if strings.TrimSpace(x) != "" {
+				return strings.TrimSpace(x)
+			}
+		default:
+			s := strings.TrimSpace(fmt.Sprint(x))
+			if s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func firstPercent(row map[string]any, keys ...string) float64 {
+	for _, key := range keys {
+		v, ok := row[key]
+		if !ok || v == nil {
+			continue
+		}
+		switch x := v.(type) {
+		case float64:
+			return x
+		case int:
+			return float64(x)
+		case string:
+			s := strings.TrimSpace(strings.TrimSuffix(x, "%"))
+			if n, err := strconv.ParseFloat(s, 64); err == nil {
+				return n
+			}
+		default:
+			s := strings.TrimSpace(strings.TrimSuffix(fmt.Sprint(x), "%"))
+			if n, err := strconv.ParseFloat(s, 64); err == nil {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+func splitManagedPodName(root, name string) (string, string, bool) {
+	agents := listByExt(filepath.Join(root, "agents"), ".sh")
+	sort.SliceStable(agents, func(i, j int) bool {
+		return len(agents[i]) > len(agents[j])
+	})
+	for _, agent := range agents {
+		prefix := agent + "-"
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		instance := strings.TrimPrefix(name, prefix)
+		if validIdent(instance) {
+			return agent, instance, true
+		}
+	}
+	return "", "", false
 }
