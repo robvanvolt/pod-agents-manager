@@ -55,6 +55,14 @@
         <button type="button" aria-label="Close terminal" onclick="closeTerminal()">×</button>
       </div>
       <pre id="terminal-output" class="terminal-screen">Loading terminal…</pre>
+      <div id="terminal-empty" class="terminal-empty" hidden>
+        <p>No terminal output captured.</p>
+        <button type="button" class="primary" onclick="startTerminalSession()">Start agent session</button>
+      </div>
+      <form class="terminal-input" onsubmit="return sendTerminalLine(event)">
+        <textarea id="terminal-input" rows="2" placeholder="Send input to the agent…" onkeydown="handleTerminalInputKey(event)"></textarea>
+        <button type="submit" class="primary">Send</button>
+      </form>
     </div>
   </dialog>
 
@@ -150,6 +158,14 @@
         <circle cx="17" cy="16" r="4"></circle>
         <path d="M11 16h2"></path>
       </svg>`;
+    const ansiColors = {
+      30: '#0f172a', 31: '#ef4444', 32: '#22c55e', 33: '#eab308', 34: '#3b82f6', 35: '#a855f7', 36: '#06b6d4', 37: '#e5e7eb',
+      90: '#64748b', 91: '#f87171', 92: '#4ade80', 93: '#facc15', 94: '#60a5fa', 95: '#c084fc', 96: '#22d3ee', 97: '#f8fafc'
+    };
+    const ansiBgColors = {
+      40: '#0f172a', 41: '#7f1d1d', 42: '#14532d', 43: '#713f12', 44: '#1e3a8a', 45: '#581c87', 46: '#164e63', 47: '#e5e7eb',
+      100: '#334155', 101: '#991b1b', 102: '#166534', 103: '#854d0e', 104: '#1d4ed8', 105: '#7e22ce', 106: '#0e7490', 107: '#f8fafc'
+    };
 
     function setChip(id, value) {
       const chip = document.getElementById(id);
@@ -318,10 +334,12 @@
       document.getElementById('terminal-title').textContent = `${agent}-${instance}`;
       document.getElementById('terminal-meta').textContent = 'capturing bot tmux pane…';
       document.getElementById('terminal-output').textContent = 'Loading terminal…';
+      document.getElementById('terminal-empty').hidden = true;
+      document.getElementById('terminal-input').value = '';
       dialog.showModal();
       loadTerminal();
       clearInterval(terminalState.timer);
-      terminalState.timer = setInterval(loadTerminal, 1500);
+      terminalState.timer = setInterval(loadTerminal, 700);
     }
 
     function closeTerminal() {
@@ -339,20 +357,138 @@
         const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
         const res = await fetch(`/api/terminal?${params.toString()}`);
         const text = await res.text();
+        const empty = document.getElementById('terminal-empty');
         if (!res.ok) {
           out.textContent = res.status === 401 ? 'Unlock operator mode first.' : text;
           meta.textContent = 'capture failed';
+          if (empty) empty.hidden = true;
           return;
         }
         const data = JSON.parse(text);
         const size = data.rows && data.cols ? ` · ${data.cols}×${data.rows}` : '';
         meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
-        out.textContent = data.output || '(no terminal output captured)';
+        const noSession = data.status === 'no-session';
+        if (empty) empty.hidden = !noSession;
+        renderTerminalOutput(out, data.output || '');
         out.scrollTop = out.scrollHeight;
       } catch (err) {
         out.textContent = 'Network error: ' + err;
         meta.textContent = 'capture failed';
       }
+    }
+
+    async function startTerminalSession() {
+      const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+      const res = await fetch('/api/terminal/start', { method: 'POST', body });
+      if (!res.ok) {
+        showToast(await res.text(), true);
+        return;
+      }
+      document.getElementById('terminal-empty').hidden = true;
+      await loadTerminal();
+    }
+
+    async function sendTerminalLine(ev) {
+      ev.preventDefault();
+      const input = document.getElementById('terminal-input');
+      const value = input.value.trim();
+      if (!value) return false;
+      const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance, input: value });
+      const res = await fetch('/api/terminal/input', { method: 'POST', body });
+      if (!res.ok) {
+        showToast(await res.text(), true);
+        return false;
+      }
+      input.value = '';
+      await loadTerminal();
+      return false;
+    }
+
+    function handleTerminalInputKey(ev) {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        sendTerminalLine(ev);
+      }
+    }
+
+    function renderTerminalOutput(el, raw) {
+      if (!raw) {
+        el.textContent = '';
+        return;
+      }
+      el.innerHTML = ansiToHtml(raw);
+    }
+
+    function ansiToHtml(raw) {
+      let html = '';
+      let open = false;
+      const state = {};
+      const closeSpan = () => { if (open) { html += '</span>'; open = false; } };
+      const openSpan = () => {
+        const styles = [];
+        if (state.fg) styles.push(`color:${state.fg}`);
+        if (state.bg) styles.push(`background-color:${state.bg}`);
+        if (state.bold) styles.push('font-weight:700');
+        if (state.dim) styles.push('opacity:.72');
+        if (state.underline) styles.push('text-decoration:underline');
+        if (styles.length) { html += `<span style="${styles.join(';')}">`; open = true; }
+      };
+      const applyCodes = (codes) => {
+        closeSpan();
+        for (let i = 0; i < codes.length; i++) {
+          const code = codes[i];
+          if (code === 0) { state.fg = state.bg = ''; state.bold = state.dim = state.underline = false; }
+          else if (code === 1) state.bold = true;
+          else if (code === 2) state.dim = true;
+          else if (code === 4) state.underline = true;
+          else if (code === 22) state.bold = state.dim = false;
+          else if (code === 24) state.underline = false;
+          else if (code === 39) state.fg = '';
+          else if (code === 49) state.bg = '';
+          else if (ansiColors[code]) state.fg = ansiColors[code];
+          else if (ansiBgColors[code]) state.bg = ansiBgColors[code];
+          else if ((code === 38 || code === 48) && codes[i + 1] === 2 && codes.length >= i + 4) {
+            const color = `rgb(${codes[i + 2]},${codes[i + 3]},${codes[i + 4]})`;
+            if (code === 38) state.fg = color; else state.bg = color;
+            i += 4;
+          } else if ((code === 38 || code === 48) && codes[i + 1] === 5 && codes.length >= i + 2) {
+            const color = ansi256(codes[i + 2]);
+            if (code === 38) state.fg = color; else state.bg = color;
+            i += 2;
+          }
+        }
+        openSpan();
+      };
+      const re = /\x1b\[([0-9;]*)m/g;
+      let last = 0;
+      for (const match of raw.matchAll(re)) {
+        html += escapeHtml(raw.slice(last, match.index));
+        const codes = match[1] ? match[1].split(';').map(n => Number(n || 0)) : [0];
+        applyCodes(codes);
+        last = match.index + match[0].length;
+      }
+      html += escapeHtml(raw.slice(last));
+      closeSpan();
+      return html;
+    }
+
+    function ansi256(n) {
+      if (n < 16) {
+        const table = ['#000000','#800000','#008000','#808000','#000080','#800080','#008080','#c0c0c0','#808080','#ff0000','#00ff00','#ffff00','#0000ff','#ff00ff','#00ffff','#ffffff'];
+        return table[n] || '#e5e7eb';
+      }
+      if (n >= 16 && n <= 231) {
+        const v = n - 16;
+        const r = Math.floor(v / 36), g = Math.floor((v % 36) / 6), b = v % 6;
+        const c = x => x === 0 ? 0 : 55 + x * 40;
+        return `rgb(${c(r)},${c(g)},${c(b)})`;
+      }
+      const gray = 8 + (n - 232) * 10;
+      return `rgb(${gray},${gray},${gray})`;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     }
 
     async function sendAction(op, agent, instance) {

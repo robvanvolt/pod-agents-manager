@@ -73,6 +73,13 @@ func TestTrimTerminalOutput(t *testing.T) {
 	}
 }
 
+func TestNormalizeTerminalInput(t *testing.T) {
+	got := normalizeTerminalInput("\r\nhello\r\n")
+	if got != "hello" {
+		t.Fatalf("got %q, want hello", got)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {

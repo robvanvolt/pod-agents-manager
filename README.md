@@ -244,7 +244,9 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `POST /api/auth/login` | Unlock operator mode with the local bootstrap token |
 | `POST /api/auth/logout` | End the operator session |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
-| `GET /api/terminal` | Operator-only read capture of a pod's `bot` tmux pane for the dashboard overlay |
+| `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
+| `POST /api/terminal/start` | Start the pod's detached `bot` tmux agent session |
+| `POST /api/terminal/input` | Send input to the pod's `bot` tmux pane |
 | `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
 | `POST /api/instruct` | Queue a follow-up instruction into `~/.pod_agents_config/inbox/` |
 | `POST /api/pods/{agent}/{instance}/instructions` | REST-shaped alias for queuing pod instructions |
@@ -258,8 +260,9 @@ heuristic checks CPU activity and the foreground tmux command in the pod's
 are waiting at a prompt are shown as idle.
 
 The dashboard action bar includes a binoculars **View terminal** button. It
-opens a read-only terminal overlay that follows the pod's `bot` tmux pane, so
-you can inspect what the agent sees without SSHing into the host.
+opens a terminal overlay that follows the pod's `bot` tmux pane, can start the
+agent session when none exists, and can send input to the agent without SSHing
+into the host.
 
 Dashboard writes are protected by a local operator token. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,

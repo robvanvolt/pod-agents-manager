@@ -296,6 +296,59 @@ func main() {
 		json.NewEncoder(w).Encode(snapshot)
 	})
 
+	mux.HandleFunc("/api/terminal/start", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "terminal.start", "")
+		if !ok {
+			return
+		}
+		agent, instance, err := readTerminalTarget(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := startTerminalSession(agent, instance); err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "terminal.start", agent+"-"+instance, "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		appendAudit(root, auditEntryFromRequest(r, "terminal.start", agent+"-"+instance, "ok", "", auth.Role))
+		snapshot, err := captureTerminal(agent+"-"+instance, 180)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(snapshot)
+	})
+
+	mux.HandleFunc("/api/terminal/input", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "terminal.input", "")
+		if !ok {
+			return
+		}
+		agent, instance, input, err := readTerminalInput(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := sendTerminalInput(agent, instance, input); err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "terminal.input", agent+"-"+instance, "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		appendAudit(root, auditEntryFromRequest(r, "terminal.input", agent+"-"+instance, "ok", "", auth.Role))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
 	mux.HandleFunc("/api/inbox", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -609,7 +662,7 @@ func captureTerminal(container string, lines int) (terminalSnapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	script := fmt.Sprintf(`if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}|#{pane_height}|#{pane_width}"; printf '\n---POD_TERMINAL_CAPTURE---\n'; tmux capture-pane -p -t bot:0.0 -S -%d; else printf 'no-session||\n---POD_TERMINAL_CAPTURE---\n'; fi`, lines)
+	script := fmt.Sprintf(`if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}|#{pane_height}|#{pane_width}"; printf '\n---POD_TERMINAL_CAPTURE---\n'; tmux capture-pane -e -p -t bot:0.0 -S -%d; else printf 'no-session||\n---POD_TERMINAL_CAPTURE---\n'; fi`, lines)
 	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return snapshot, fmt.Errorf("terminal capture timed out")
@@ -630,10 +683,116 @@ func captureTerminal(container string, lines int) (terminalSnapshot, error) {
 		snapshot.Cols = strings.TrimSpace(fields[2])
 	}
 	if snapshot.Command == "" || snapshot.Command == "no-session" {
-		snapshot.Status = "idle"
+		snapshot.Status = "no-session"
 	}
 	snapshot.Output = trimTerminalOutput(capture)
 	return snapshot, nil
+}
+
+func startTerminalSession(agent, instance string) error {
+	container := agent + "-" + instance
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
+		"podman", "exec",
+		"-e", "TERM=xterm-256color",
+		"-e", "COLORTERM=truecolor",
+		"-e", "POD_AGENT="+agent,
+		"-e", "OPENAI_BASE_URL="+os.Getenv("OPENAI_BASE_URL"),
+		"-e", "OPENAI_API_BASE="+os.Getenv("OPENAI_BASE_URL"),
+		"-e", "OPENAI_API_KEY="+os.Getenv("OPENAI_API_KEY"),
+		"-e", "DEFAULT_MODEL="+os.Getenv("DEFAULT_MODEL"),
+		"-e", "POD_DEFAULT_MODEL="+os.Getenv("POD_DEFAULT_MODEL"),
+		container,
+		"bash", "-lc", `if tmux has-session -t bot 2>/dev/null; then exit 0; fi; tmux new-session -d -s bot 'bash -lc "${POD_AGENT} || true; exec bash"'`,
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("terminal start timed out")
+	}
+	if err != nil {
+		msg := strings.TrimSpace(stripANSI(string(out)))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func sendTerminalInput(agent, instance, input string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	args := []string{"exec", agent + "-" + instance, "tmux", "send-keys", "-t", "bot:0.0", "--", input, "Enter"}
+	cmd := exec.CommandContext(ctx, "podman", args...)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("terminal input timed out")
+	}
+	if err != nil {
+		msg := strings.TrimSpace(stripANSI(string(out)))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
+}
+
+func readTerminalTarget(r *http.Request) (string, string, error) {
+	if err := r.ParseForm(); err != nil {
+		return "", "", fmt.Errorf("bad form data")
+	}
+	agent := strings.TrimSpace(r.FormValue("agent"))
+	instance := strings.TrimSpace(r.FormValue("instance"))
+	if !validIdent(agent) || !validIdent(instance) {
+		return "", "", fmt.Errorf("invalid agent/instance")
+	}
+	return agent, instance, nil
+}
+
+func readTerminalInput(r *http.Request) (string, string, string, error) {
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		var body struct {
+			Agent    string `json:"agent"`
+			Instance string `json:"instance"`
+			Input    string `json:"input"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
+			return "", "", "", fmt.Errorf("invalid JSON body")
+		}
+		body.Agent = strings.TrimSpace(body.Agent)
+		body.Instance = strings.TrimSpace(body.Instance)
+		if !validIdent(body.Agent) || !validIdent(body.Instance) {
+			return "", "", "", fmt.Errorf("invalid agent/instance")
+		}
+		input := normalizeTerminalInput(body.Input)
+		if input == "" {
+			return "", "", "", fmt.Errorf("input is required")
+		}
+		return body.Agent, body.Instance, input, nil
+	}
+	agent, instance, err := readTerminalTarget(r)
+	if err != nil {
+		return "", "", "", err
+	}
+	input := normalizeTerminalInput(r.FormValue("input"))
+	if input == "" {
+		return "", "", "", fmt.Errorf("input is required")
+	}
+	return agent, instance, input, nil
+}
+
+func normalizeTerminalInput(input string) string {
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	input = strings.ReplaceAll(input, "\r", "\n")
+	input = strings.Trim(input, "\n")
+	if len(input) > 8000 {
+		input = input[:8000]
+	}
+	return input
 }
 
 func splitTerminalProbeOutput(out string) (string, string) {
