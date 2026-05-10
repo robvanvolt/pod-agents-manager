@@ -1,9 +1,12 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSplitManagedPodNamePrefersLongestAgent(t *testing.T) {
@@ -59,5 +62,27 @@ func TestAppendAndReadInboxEntry(t *testing.T) {
 	}
 	if entries[0].Body != "check this" || entries[0].Status != "pending" {
 		t.Fatalf("unexpected entry: %#v", entries[0])
+	}
+}
+
+func TestBootstrapTokenCreatesOperatorSession(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().Format(time.RFC3339)
+	if err := saveAuthState(root, authState{
+		BootstrapTokenSHA256: tokenHash("secret-token"),
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/auth/login", nil)
+	session, err := verifyBootstrapTokenAndCreateSession(root, "secret-token", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: "pod_session", Value: session})
+	if got := currentAuthContext(req, root).Role; got != "operator" {
+		t.Fatalf("got role %q, want operator", got)
 	}
 }

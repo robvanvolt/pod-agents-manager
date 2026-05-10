@@ -29,7 +29,7 @@ Actions:
   inbox        inbox [agent instance] [--json|--clear]
                instruct <agent> <instance> <instruction...>
                ask <agent> <instance> "Question?" --option A --option B
-  server       server {start|stop|restart|status|logs|build}
+  server       server {start|stop|restart|status|logs|build|token rotate}
   diagnostics  doctor
   uninstall    uninstall
 
@@ -49,6 +49,7 @@ Examples:
   ${_cmd} ask pi dev "Use red or blue?" --option red --option blue
   ${_cmd} inbox pi dev
   ${_cmd} server start
+  ${_cmd} server token rotate
   ${_cmd} uninstall
   ${_cmd} --version
 EOF

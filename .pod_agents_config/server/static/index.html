@@ -21,7 +21,9 @@
         <span class="chip version" id="chip-version" hidden><span class="label">version</span><code id="chip-version-val">–</code></span>
         <span class="chip" id="chip-host" hidden><span class="label">host</span><code id="chip-host-val">–</code></span>
         <span class="chip" id="chip-ip" hidden><span class="label">ip</span><code id="chip-ip-val">–</code></span>
+        <span class="chip" id="chip-auth"><span class="label">role</span><code id="chip-auth-val">viewer</code></span>
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
+        <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
     </div>
   <div id="toast" class="toast"></div>
@@ -60,6 +62,8 @@
   </div>
 
   <script>
+    let authState = { role: 'viewer', authenticated: false };
+
     const fmtBytes = (raw) => {
       const n = Number(raw);
       if (!isFinite(n) || raw === undefined || raw === null) return String(raw ?? '-');
@@ -125,6 +129,53 @@
       } catch (_) {}
     }
 
+    async function fetchAuthStatus() {
+      try {
+        const res = await fetch('/api/auth/status');
+        authState = await res.json();
+      } catch (_) {
+        authState = { role: 'viewer', authenticated: false };
+      }
+      renderAuthState();
+    }
+
+    function renderAuthState() {
+      setChip('chip-auth', authState.role || 'viewer');
+      const btn = document.getElementById('auth-button');
+      if (btn) btn.textContent = authState.authenticated ? 'Lock' : 'Unlock';
+      const canWrite = authState.role === 'operator';
+      const submit = document.getElementById('f-submit');
+      if (submit) {
+        submit.disabled = !canWrite;
+        submit.title = canWrite ? '' : 'Unlock operator mode to create pods';
+      }
+      document.querySelectorAll('[data-write-action]').forEach(el => {
+        el.disabled = !canWrite || el.dataset.disabledReason === 'idle';
+      });
+    }
+
+    async function toggleAuth() {
+      if (authState.authenticated) {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        showToast('Dashboard locked');
+        await fetchAuthStatus();
+        fetchStats();
+        return;
+      }
+      const token = prompt('Dashboard operator token');
+      if (!token) return;
+      const body = new URLSearchParams();
+      body.append('token', token.trim());
+      const res = await fetch('/api/auth/login', { method: 'POST', body });
+      if (!res.ok) {
+        showToast('Unlock failed', true);
+        return;
+      }
+      showToast('Operator mode unlocked');
+      await fetchAuthStatus();
+      fetchStats();
+    }
+
     function updateClock() {
       const val = document.getElementById('chip-time-val');
       if (val) val.textContent = new Date().toLocaleTimeString();
@@ -155,13 +206,14 @@
         const mem = parsePct(c.MemPerc);
         const id = (c.ID || c.ContainerID || '').slice(0, 12);
         const canInstruct = String(c.ActivityState || '').toLowerCase() === 'idle';
+        const canWrite = authState.role === 'operator';
         const actions = (agent && instance) ? `
           <div class="inline">
-            <button onclick="sendAction('restart','${agent}','${instance}')">restart</button>
-            <button onclick="sendAction('stop','${agent}','${instance}')">stop</button>
-            <button onclick="sendAction('start','${agent}','${instance}')">start</button>
-            <button ${canInstruct ? '' : 'disabled title="pod is not idle"'} onclick="sendInstruction('${agent}','${instance}')">instruct</button>
-            <button class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('restart','${agent}','${instance}')">restart</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('stop','${agent}','${instance}')">stop</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('start','${agent}','${instance}')">start</button>
+            <button data-write-action data-disabled-reason="${canInstruct ? '' : 'idle'}" ${canWrite && canInstruct ? '' : 'disabled'} title="${canInstruct ? '' : 'pod is not idle'}" onclick="sendInstruction('${agent}','${instance}')">instruct</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
           </div>` : '';
         return `<tr>
           <td><code>${id}</code></td>
@@ -191,7 +243,7 @@
       try {
         const res = await fetch('/api/action', { method: 'POST', body: formData });
         const text = await res.text();
-        showToast(res.ok ? `${op} ${agent} ${instance}` : text, !res.ok);
+        showToast(res.ok ? `${op} ${agent} ${instance}` : (res.status === 401 ? 'Unlock operator mode first' : text), !res.ok);
         fetchStats();
       } catch (err) {
         showToast('Network error: ' + err, true);
@@ -209,7 +261,7 @@
         const res = await fetch('/api/instruct', { method: 'POST', body: formData });
         const text = await res.text();
         let data; try { data = JSON.parse(text); } catch (_) { data = { error: text }; }
-        showToast(res.ok ? `Queued instruction ${data.entry?.id || ''}` : (data.error || text), !res.ok);
+        showToast(res.ok ? `Queued instruction ${data.entry?.id || ''}` : (res.status === 401 ? 'Unlock operator mode first' : (data.error || text)), !res.ok);
       } catch (err) {
         showToast('Network error: ' + err, true);
       }
@@ -276,7 +328,7 @@
           fetchStats();
         } else {
           statusEl.textContent = 'failed';
-          outEl.textContent = data.output || data.error || text;
+          outEl.textContent = res.status === 401 ? 'Unlock operator mode first.' : (data.output || data.error || text);
           outEl.style.display = 'block';
           showToast('Create failed — see output below', true);
         }
@@ -290,10 +342,12 @@
     }
 
     fetchInfo();
+    fetchAuthStatus();
     fetchStats();
     loadAgentOptions();
     setInterval(fetchStats, 3000);
     setInterval(fetchInfo, 30000);
+    setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);
   </script>
 </body>

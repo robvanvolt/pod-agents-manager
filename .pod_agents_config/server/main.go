@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +27,7 @@ import (
 var (
 	statsCache           []byte
 	cacheMutex           sync.RWMutex
+	authMutex            sync.Mutex
 	activityBusyCPUPct   = 1.0
 	activityProbeTimeout = 900 * time.Millisecond
 )
@@ -29,6 +36,7 @@ func main() {
 	// Background loop refreshes podman stats every few seconds
 	go updateStatsLoop()
 
+	root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./static")))
 
@@ -45,7 +53,6 @@ func main() {
 
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		hostname, _ := os.Hostname()
-		root := os.Getenv("HOME") + "/.pod_agents_config"
 		resp := map[string]any{
 			"hostname": hostname,
 			"ips":      localIPs(),
@@ -56,8 +63,60 @@ func main() {
 		json.NewEncoder(w).Encode(resp)
 	})
 
+	mux.HandleFunc("/api/auth/status", func(w http.ResponseWriter, r *http.Request) {
+		auth := currentAuthContext(r, root)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"authenticated":  auth.Role == "operator",
+			"role":           auth.Role,
+			"writeProtected": true,
+			"passkeys": map[string]any{
+				"enabled":        false,
+				"browserPackage": "@simplewebauthn/browser",
+				"serverPackage":  "@simplewebauthn/server",
+				"status":         "planned",
+			},
+		})
+	})
+
+	mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		token, err := readLoginToken(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		session, err := verifyBootstrapTokenAndCreateSession(root, token, r)
+		if err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "auth.login", "", "denied", err.Error(), "viewer"))
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		setSessionCookie(w, session)
+		appendAudit(root, auditEntryFromRequest(r, "auth.login", "", "ok", "", "operator"))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "role": "operator"})
+	})
+
+	mux.HandleFunc("/api/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		role := currentAuthContext(r, root).Role
+		if session := sessionTokenFromRequest(r); session != "" {
+			revokeSession(root, session)
+		}
+		clearSessionCookie(w)
+		appendAudit(root, auditEntryFromRequest(r, "auth.logout", "", "ok", "", role))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	})
+
 	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
-		root := os.Getenv("HOME") + "/.pod_agents_config"
 		resp := map[string]any{
 			"agents":      listByExt(filepath.Join(root, "agents"), ".sh"),
 			"flavors":     append([]string{"all"}, listByExt(filepath.Join(root, "flavors"), ".containerfile")...),
@@ -72,6 +131,10 @@ func main() {
 	mux.HandleFunc("/api/create", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "create", "")
+		if !ok {
 			return
 		}
 		if err := r.ParseForm(); err != nil {
@@ -116,6 +179,8 @@ func main() {
 		output, err := cmd.CombinedOutput()
 		w.Header().Set("Content-Type", "application/json")
 		status := http.StatusOK
+		result := "ok"
+		errText := ""
 		body := map[string]any{
 			"agent": agent, "instance": instance,
 			"flavor": flavor, "volumes": volumes, "base": base,
@@ -123,11 +188,14 @@ func main() {
 		}
 		if err != nil {
 			status = http.StatusInternalServerError
+			result = "error"
+			errText = err.Error()
 			body["status"] = "error"
 			body["error"] = err.Error()
 		} else {
 			body["status"] = "ok"
 		}
+		appendAudit(root, auditEntryFromRequest(r, "create", agent+"-"+instance, result, errText, auth.Role))
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(body)
 	})
@@ -135,6 +203,10 @@ func main() {
 	mux.HandleFunc("/api/action", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "action", "")
+		if !ok {
 			return
 		}
 		if err := r.ParseForm(); err != nil {
@@ -163,9 +235,11 @@ func main() {
 			fmt.Sprintf("source ~/.pod_agents && pod %s %s %s", op, agent, instance))
 		output, err := cmd.CombinedOutput()
 		if err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "action."+op, agent+"-"+instance, "error", err.Error(), auth.Role))
 			http.Error(w, fmt.Sprintf("Action failed: %s\n%s", err, string(output)), http.StatusInternalServerError)
 			return
 		}
+		appendAudit(root, auditEntryFromRequest(r, "action."+op, agent+"-"+instance, "ok", "", auth.Role))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
@@ -175,7 +249,6 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/inbox", func(w http.ResponseWriter, r *http.Request) {
-		root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 		switch r.Method {
 		case http.MethodGet:
 			agent := strings.TrimSpace(r.URL.Query().Get("agent"))
@@ -188,7 +261,7 @@ func main() {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"entries": entries})
 		case http.MethodPost:
-			handleInstruct(w, r, root)
+			handleInstruct(w, r, root, currentAuthContext(r, root))
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -199,8 +272,7 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
-		handleInstruct(w, r, root)
+		handleInstruct(w, r, root, currentAuthContext(r, root))
 	})
 
 	mux.HandleFunc("/api/pods/", func(w http.ResponseWriter, r *http.Request) {
@@ -208,13 +280,12 @@ func main() {
 			http.NotFound(w, r)
 			return
 		}
-		root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 		agent, instance, ok := parsePodInstructionPath(r.URL.Path)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		handleInstructForTarget(w, r, root, agent, instance)
+		handleInstructForTarget(w, r, root, agent, instance, currentAuthContext(r, root))
 	})
 
 	port := os.Getenv("POD_SERVER_PORT")
@@ -514,6 +585,285 @@ func splitManagedPodName(root, name string) (string, string, bool) {
 	return "", "", false
 }
 
+type authContext struct {
+	Role string
+}
+
+type authState struct {
+	BootstrapTokenSHA256 string        `json:"bootstrap_token_sha256"`
+	CreatedAt            string        `json:"created_at"`
+	UpdatedAt            string        `json:"updated_at"`
+	Sessions             []authSession `json:"sessions"`
+}
+
+type authSession struct {
+	TokenSHA256 string `json:"token_sha256"`
+	Role        string `json:"role"`
+	CreatedAt   string `json:"created_at"`
+	ExpiresAt   string `json:"expires_at"`
+	RemoteAddr  string `json:"remote_addr,omitempty"`
+	UserAgent   string `json:"user_agent,omitempty"`
+}
+
+type auditEntry struct {
+	Time       string `json:"time"`
+	Action     string `json:"action"`
+	Target     string `json:"target,omitempty"`
+	Result     string `json:"result"`
+	Error      string `json:"error,omitempty"`
+	Role       string `json:"role"`
+	RemoteAddr string `json:"remote_addr,omitempty"`
+	UserAgent  string `json:"user_agent,omitempty"`
+}
+
+func authFile(root string) string { return filepath.Join(root, "server", "auth.json") }
+
+func auditFile(root string) string { return filepath.Join(root, "server", "audit.jsonl") }
+
+func currentAuthContext(r *http.Request, root string) authContext {
+	role := "viewer"
+	session := sessionTokenFromRequest(r)
+	if session == "" {
+		return authContext{Role: role}
+	}
+	state, err := loadAuthState(root)
+	if err != nil {
+		return authContext{Role: role}
+	}
+	now := time.Now()
+	hash := tokenHash(session)
+	for _, s := range state.Sessions {
+		expires, err := time.Parse(time.RFC3339, s.ExpiresAt)
+		if err != nil || now.After(expires) {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(s.TokenSHA256), []byte(hash)) == 1 && s.Role == "operator" {
+			role = "operator"
+			break
+		}
+	}
+	return authContext{Role: role}
+}
+
+func requireOperator(w http.ResponseWriter, r *http.Request, root, action, target string) (authContext, bool) {
+	auth := currentAuthContext(r, root)
+	if auth.Role == "operator" {
+		return auth, true
+	}
+	appendAudit(root, auditEntryFromRequest(r, action, target, "denied", "operator role required", auth.Role))
+	http.Error(w, "operator role required", http.StatusUnauthorized)
+	return auth, false
+}
+
+func readLoginToken(r *http.Request) (string, error) {
+	contentType := r.Header.Get("Content-Type")
+	if strings.Contains(contentType, "application/json") {
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+			return "", fmt.Errorf("invalid JSON body")
+		}
+		body.Token = strings.TrimSpace(body.Token)
+		if body.Token == "" {
+			return "", fmt.Errorf("token is required")
+		}
+		return body.Token, nil
+	}
+	if err := r.ParseForm(); err != nil {
+		return "", fmt.Errorf("bad form data")
+	}
+	token := strings.TrimSpace(r.FormValue("token"))
+	if token == "" {
+		return "", fmt.Errorf("token is required")
+	}
+	return token, nil
+}
+
+func verifyBootstrapTokenAndCreateSession(root, token string, r *http.Request) (string, error) {
+	authMutex.Lock()
+	defer authMutex.Unlock()
+
+	state, err := loadAuthState(root)
+	if err != nil {
+		return "", err
+	}
+	if state.BootstrapTokenSHA256 == "" {
+		return "", fmt.Errorf("bootstrap token not configured; run `pod server token rotate`")
+	}
+	if subtle.ConstantTimeCompare([]byte(state.BootstrapTokenSHA256), []byte(tokenHash(token))) != 1 {
+		return "", fmt.Errorf("invalid bootstrap token")
+	}
+	session, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	state.Sessions = compactSessions(state.Sessions, now)
+	state.Sessions = append(state.Sessions, authSession{
+		TokenSHA256: tokenHash(session),
+		Role:        "operator",
+		CreatedAt:   now.Format(time.RFC3339),
+		ExpiresAt:   now.Add(24 * time.Hour).Format(time.RFC3339),
+		RemoteAddr:  clientIP(r),
+		UserAgent:   r.UserAgent(),
+	})
+	state.UpdatedAt = now.Format(time.RFC3339)
+	if err := saveAuthState(root, state); err != nil {
+		return "", err
+	}
+	return session, nil
+}
+
+func revokeSession(root, session string) {
+	authMutex.Lock()
+	defer authMutex.Unlock()
+
+	state, err := loadAuthState(root)
+	if err != nil {
+		return
+	}
+	hash := tokenHash(session)
+	kept := []authSession{}
+	for _, s := range state.Sessions {
+		if subtle.ConstantTimeCompare([]byte(s.TokenSHA256), []byte(hash)) == 1 {
+			continue
+		}
+		kept = append(kept, s)
+	}
+	state.Sessions = compactSessions(kept, time.Now())
+	state.UpdatedAt = time.Now().Format(time.RFC3339)
+	_ = saveAuthState(root, state)
+}
+
+func compactSessions(sessions []authSession, now time.Time) []authSession {
+	out := []authSession{}
+	for _, s := range sessions {
+		expires, err := time.Parse(time.RFC3339, s.ExpiresAt)
+		if err == nil && now.Before(expires) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func loadAuthState(root string) (authState, error) {
+	var state authState
+	data, err := os.ReadFile(authFile(root))
+	if err != nil {
+		return state, err
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		return state, err
+	}
+	return state, nil
+}
+
+func saveAuthState(root string, state authState) error {
+	path := authFile(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o600)
+}
+
+func randomToken(bytesLen int) (string, error) {
+	buf := make([]byte, bytesLen)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func tokenHash(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func sessionTokenFromRequest(r *http.Request) string {
+	if cookie, err := r.Cookie("pod_session"); err == nil {
+		return cookie.Value
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+		return strings.TrimSpace(auth[7:])
+	}
+	return ""
+}
+
+func setSessionCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "pod_session",
+		Value:    token,
+		Path:     "/",
+		MaxAge:   24 * 60 * 60,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "pod_session",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func appendAudit(root string, entry auditEntry) {
+	path := auditFile(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		log.Printf("audit mkdir failed: %v", err)
+		return
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		log.Printf("audit marshal failed: %v", err)
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		log.Printf("audit open failed: %v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		log.Printf("audit write failed: %v", err)
+	}
+}
+
+func auditEntryFromRequest(r *http.Request, action, target, result, errText, role string) auditEntry {
+	return auditEntry{
+		Time:       time.Now().Format(time.RFC3339),
+		Action:     action,
+		Target:     target,
+		Result:     result,
+		Error:      errText,
+		Role:       role,
+		RemoteAddr: clientIP(r),
+		UserAgent:  r.UserAgent(),
+	}
+}
+
+func clientIP(r *http.Request) string {
+	forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+	if forwarded != "" {
+		return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 type inboxEntry struct {
 	ID        string   `json:"id"`
 	CreatedAt string   `json:"created_at"`
@@ -537,17 +887,22 @@ func parsePodInstructionPath(path string) (string, string, bool) {
 	return parts[2], parts[3], true
 }
 
-func handleInstruct(w http.ResponseWriter, r *http.Request, root string) {
+func handleInstruct(w http.ResponseWriter, r *http.Request, root string, auth authContext) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad form data: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	agent := strings.TrimSpace(r.FormValue("agent"))
 	instance := strings.TrimSpace(r.FormValue("instance"))
-	handleInstructForTarget(w, r, root, agent, instance)
+	handleInstructForTarget(w, r, root, agent, instance, auth)
 }
 
-func handleInstructForTarget(w http.ResponseWriter, r *http.Request, root, agent, instance string) {
+func handleInstructForTarget(w http.ResponseWriter, r *http.Request, root, agent, instance string, auth authContext) {
+	if auth.Role != "operator" {
+		appendAudit(root, auditEntryFromRequest(r, "instruct", agent+"-"+instance, "denied", "operator role required", auth.Role))
+		http.Error(w, "operator role required", http.StatusUnauthorized)
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Bad form data: "+err.Error(), http.StatusBadRequest)
 		return
@@ -566,9 +921,11 @@ func handleInstructForTarget(w http.ResponseWriter, r *http.Request, root, agent
 	}
 	entry, err := appendInboxEntry(root, "instruction", agent, instance, "dashboard", body, nil)
 	if err != nil {
+		appendAudit(root, auditEntryFromRequest(r, "instruct", agent+"-"+instance, "error", err.Error(), auth.Role))
 		http.Error(w, "failed to queue instruction: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	appendAudit(root, auditEntryFromRequest(r, "instruct", agent+"-"+instance, "ok", "", auth.Role))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"status": "ok", "entry": entry})
 }

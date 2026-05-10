@@ -37,12 +37,13 @@
                 return $?
                 ;;
             server)
-                local server_options=("start" "stop" "restart" "status" "logs")
+                local server_options=("start" "stop" "restart" "status" "logs" "token rotate")
                 echo -e "\033[36mServer action:\033[0m"
                 local original_ps3="$PS3"
                 PS3="Action: "
                 select sa in "${server_options[@]}" "Cancel"; do
                     [ "$sa" = "Cancel" ] && { PS3="$original_ps3"; return 0; }
+                    [ "$sa" = "token rotate" ] && { PS3="$original_ps3"; _pod_agents_main server token rotate; return $?; }
                     [ -n "$sa" ] && { PS3="$original_ps3"; _pod_agents_main server "$sa"; return $?; }
                 done
                 ;;

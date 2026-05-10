@@ -592,6 +592,26 @@ t_inbox_ask_queues_options() {
     return 0
 }
 
+t_server_token_rotate_writes_auth() {
+    local sandbox out auth_file
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" server token rotate 2>&1)
+    auth_file="$sandbox/.pod_agents_config/server/auth.json"
+    if [ ! -f "$auth_file" ]; then
+        echo "  auth file missing; output was: $out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"bootstrap_token_sha256"' "$auth_file" || ! grep -q '"sessions": \[\]' "$auth_file"; then
+        echo "  auth file missing expected fields" >&2
+        cat "$auth_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 
 echo "==> pod-agents-manager test suite"
@@ -644,6 +664,7 @@ run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options
+run_test "server: token rotate writes auth"    t_server_token_rotate_writes_auth
 
 echo
 echo "==> Summary: $passes passed, $fails failed"

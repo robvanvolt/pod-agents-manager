@@ -184,6 +184,7 @@ Inbox          pod inbox [agent instance] [--json|--clear]
                pod instruct <agent> <instance> <instruction...>
                pod ask <agent> <instance> "Question?" --option A --option B
 Dashboard      pod server start | stop | restart | status | logs | build
+               pod server token rotate
 Diagnostics    pod doctor
 Defaults       pod base <alpine|trixie-slim|...>
 ```
@@ -239,6 +240,9 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /` | Single-page dashboard |
 | `GET /api/stats` | Cached `podman stats --all --no-stream` JSON, refreshed every 3s |
 | `GET /api/info` | Hostname, LAN IPs, server time |
+| `GET /api/auth/status` | Current dashboard role and passkey readiness |
+| `POST /api/auth/login` | Unlock operator mode with the local bootstrap token |
+| `POST /api/auth/logout` | End the operator session |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
 | `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
 | `POST /api/instruct` | Queue a follow-up instruction into `~/.pod_agents_config/inbox/` |
@@ -250,6 +254,21 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 so the dashboard can show whether an agent looks idle or busy. The first-pass
 heuristic checks CPU activity and the foreground tmux command in the pod's
 `bot` session.
+
+Dashboard writes are protected by a local operator token. Viewers can load the
+dashboard and inspect stats without a login; creating, deleting, starting,
+stopping, restarting, and queuing instructions requires unlocking operator mode.
+
+```bash
+pod server token rotate   # prints a one-time operator token
+pod server restart
+```
+
+Operator sessions are stored as HttpOnly cookies, token hashes and sessions live
+in `~/.pod_agents_config/server/auth.json`, and write attempts are appended to
+`~/.pod_agents_config/server/audit.jsonl`. `GET /api/auth/status` advertises the
+planned SimpleWebAuthn package pair (`@simplewebauthn/browser` and
+`@simplewebauthn/server`) so passkeys can plug into the same role/session model.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 
