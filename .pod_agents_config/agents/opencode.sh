@@ -1,5 +1,10 @@
 AGENT_VOLUME_CONFIG_PATH="/root/.config/opencode"
 
+# Non-interactive prompt mode for `pod batch` and `pod test`.
+# `opencode run <message..>` is the documented one-shot subcommand;
+# bare `opencode <arg>` treats <arg> as a project path.
+AGENT_BATCH_INVOKE='opencode run "$PROMPT"'
+
 agent_build_containerfile() {
     local build_dir="$1"
     local flavor="$2"

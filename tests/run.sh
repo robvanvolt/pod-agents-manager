@@ -552,6 +552,160 @@ t_helpers_unit() {
     return "$rc"
 }
 
+t_inbox_instruct_queues() {
+    local sandbox out inbox_file
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" instruct pi dev "check the diff" 2>&1)
+    inbox_file="$sandbox/.pod_agents_config/inbox/pi-dev.jsonl"
+    if [ ! -f "$inbox_file" ]; then
+        echo "  inbox file missing; output was: $out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"type":"instruction"' "$inbox_file" || ! grep -q '"body":"check the diff"' "$inbox_file"; then
+        echo "  inbox entry did not contain expected instruction" >&2
+        cat "$inbox_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
+t_inbox_ask_queues_options() {
+    local sandbox inbox_file
+    sandbox=$(setup_sandbox)
+    run_pod_in_sandbox "$sandbox" ask pi dev "Use red or blue?" --option red --option blue >/dev/null 2>&1
+    inbox_file="$sandbox/.pod_agents_config/inbox/pi-dev.jsonl"
+    if [ ! -f "$inbox_file" ]; then
+        echo "  inbox file missing" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"type":"question"' "$inbox_file" || ! grep -q '"options":\["red","blue"\]' "$inbox_file"; then
+        echo "  inbox entry did not contain expected question/options" >&2
+        cat "$inbox_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
+t_test_no_args_prints_usage() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" test 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if [ "$rc" -eq 0 ]; then
+        echo "  expected nonzero exit; got 0" >&2
+        return 1
+    fi
+    if ! printf '%s' "$out" | grep -q "Usage:"; then
+        echo "  expected usage banner; got: $out" >&2
+        return 1
+    fi
+    return 0
+}
+
+t_test_all_errors_when_server_not_running() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    # Pin to an unused port so the curl probe deterministically fails in the
+    # sandbox, regardless of what's running on the dev host.
+    out=$(POD_SERVER_PORT=59999 run_pod_in_sandbox "$sandbox" test --all 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if [ "$rc" -eq 0 ]; then
+        echo "  expected nonzero exit when sham endpoint missing; got 0" >&2
+        return 1
+    fi
+    if ! printf '%s' "$out" | grep -qiE "sham endpoint not reachable|server start"; then
+        echo "  expected sham-endpoint guidance; got: $out" >&2
+        return 1
+    fi
+    return 0
+}
+
+t_server_token_rotate_writes_auth() {
+    local sandbox out auth_file
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" server token rotate 2>&1)
+    auth_file="$sandbox/.pod_agents_config/server/auth.json"
+    if [ ! -f "$auth_file" ]; then
+        echo "  auth file missing; output was: $out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"bootstrap_token_sha256"' "$auth_file" || ! grep -q '"sessions": \[\]' "$auth_file"; then
+        echo "  auth file missing expected fields" >&2
+        cat "$auth_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
+t_server_auth_login_curl_integration() {
+    if [ "${POD_RUN_SERVER_INTEGRATION:-0}" != "1" ]; then
+        printf '  set POD_RUN_SERVER_INTEGRATION=1 to run the live curl auth smoke\n'
+        return 0
+    fi
+    command -v go >/dev/null 2>&1 || { echo "  go is required" >&2; return 1; }
+    command -v curl >/dev/null 2>&1 || { echo "  curl is required" >&2; return 1; }
+
+    local sandbox out token port server_dir pid_file cookies code audit_file
+    sandbox=$(setup_sandbox)
+    server_dir="$sandbox/.pod_agents_config/server"
+    audit_file="$server_dir/audit.jsonl"
+    cookies="$sandbox/cookies.txt"
+    port=$((19000 + (RANDOM % 20000)))
+
+    out=$(run_pod_in_sandbox "$sandbox" server token rotate 2>&1) || {
+        echo "$out" | sed 's/^/    /' >&2
+        rm -rf "$sandbox"
+        return 1
+    }
+    token=$(printf '%s\n' "$out" | tail -n 1)
+    ( cd .pod_agents_config/server && GOCACHE="${TMPDIR:-/tmp}/pod-agents-go-cache" GO111MODULE=off go build -o "$server_dir/server" . ) || {
+        rm -rf "$sandbox"
+        return 1
+    }
+
+    ( cd "$server_dir" && HOME="$sandbox" POD_SERVER_PORT="$port" ./server >/tmp/pod-agents-test-server.log 2>&1 & echo "$!" > "$server_dir/test.pid" )
+    pid_file="$server_dir/test.pid"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        curl -fsS "http://127.0.0.1:${port}/api/auth/status" >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+
+    code=$(curl -sS -o "$sandbox/login.out" -w "%{http_code}" -c "$cookies" \
+        -X POST --data-urlencode "token=$token" \
+        "http://127.0.0.1:${port}/api/auth/login")
+    if [ -f "$pid_file" ]; then kill "$(cat "$pid_file")" 2>/dev/null || true; fi
+    if [ "$code" != "200" ]; then
+        echo "  login returned HTTP $code" >&2
+        cat "$sandbox/login.out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if [ ! -s "$cookies" ] || ! grep -q 'pod_session' "$cookies"; then
+        echo "  login did not set pod_session cookie" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"action":"auth.login"' "$audit_file" || ! grep -q '"result":"ok"' "$audit_file"; then
+        echo "  audit log missing auth.login ok entry" >&2
+        [ -f "$audit_file" ] && cat "$audit_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 
 echo "==> pod-agents-manager test suite"
@@ -602,6 +756,12 @@ run_test "api-key flag: --api-key=VAL parses"     t_api_key_hyphen_eq_form_parse
 run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
+run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
+run_test "inbox: ask queues options"           t_inbox_ask_queues_options
+run_test "test: no args prints usage"          t_test_no_args_prints_usage
+run_test "test: --all errors w/o server"       t_test_all_errors_when_server_not_running
+run_test "server: token rotate writes auth"    t_server_token_rotate_writes_auth
+run_test "server: auth login curl integration" t_server_auth_login_curl_integration
 
 echo
 echo "==> Summary: $passes passed, $fails failed"

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pod Dashboard</title>
   <link rel="icon" href="./logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./vendor/xterm/xterm.css">
   <link rel="stylesheet" href="./dashboard.css">
 </head>
 <body>
@@ -21,10 +22,50 @@
         <span class="chip version" id="chip-version" hidden><span class="label">version</span><code id="chip-version-val">–</code></span>
         <span class="chip" id="chip-host" hidden><span class="label">host</span><code id="chip-host-val">–</code></span>
         <span class="chip" id="chip-ip" hidden><span class="label">ip</span><code id="chip-ip-val">–</code></span>
+        <span class="chip" id="chip-auth"><span class="label">role</span><code id="chip-auth-val">viewer</code></span>
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
+        <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
-    </div>
+  </div>
   <div id="toast" class="toast"></div>
+  <dialog id="auth-dialog" class="auth-dialog">
+    <form method="dialog" class="auth-panel" onsubmit="return submitAuthDialog(event)">
+      <div class="auth-head">
+        <h2>Unlock Operator Mode</h2>
+        <button type="button" aria-label="Close" onclick="closeAuthDialog()">×</button>
+      </div>
+      <label for="auth-token">Operator token</label>
+      <div class="auth-input-row">
+        <input id="auth-token" name="token" type="password" autocomplete="current-password">
+        <button type="button" id="auth-token-toggle" onclick="toggleTokenVisibility()">Show</button>
+      </div>
+      <p id="auth-error" class="auth-error" aria-live="polite"></p>
+      <div class="auth-actions">
+        <button type="button" onclick="closeAuthDialog()">Cancel</button>
+        <button type="submit" class="primary">Unlock</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="terminal-dialog" class="terminal-dialog">
+    <div class="terminal-panel">
+      <div class="terminal-head">
+        <div>
+          <h2 id="terminal-title">Terminal</h2>
+          <p id="terminal-meta">waiting for capture</p>
+        </div>
+        <button type="button" aria-label="Close terminal" onclick="closeTerminal()">×</button>
+      </div>
+      <div id="terminal-output" class="terminal-screen"></div>
+      <div id="terminal-empty" class="terminal-empty" hidden>
+        <p>No terminal output captured.</p>
+        <button type="button" class="primary" onclick="startTerminalSession()">Start agent session</button>
+      </div>
+      <form class="terminal-input" onsubmit="return sendTerminalLine(event)">
+        <textarea id="terminal-input" rows="2" placeholder="Send input to the agent…" onkeydown="handleTerminalInputKey(event)"></textarea>
+        <button type="submit" class="primary">Send</button>
+      </form>
+    </div>
+  </dialog>
 
   <div class="card">
   <table>
@@ -59,7 +100,11 @@
   </div>
   </div>
 
+  <script src="./vendor/xterm/xterm.js"></script>
   <script>
+    let authState = { role: 'viewer', authenticated: false };
+    let terminalState = { agent: '', instance: '', timer: null, followTail: true, term: null, rendering: false };
+
     const fmtBytes = (raw) => {
       const n = Number(raw);
       if (!isFinite(n) || raw === undefined || raw === null) return String(raw ?? '-');
@@ -105,7 +150,16 @@
       const title = String(detail || '').replace(/"/g, '&quot;');
       return `<span class="activity-badge ${safeState}" title="${title}"><span></span>${label}</span>`;
     };
-
+    const binocularIcon = () => `
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+        <path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path>
+        <path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path>
+        <path d="M9 5h6"></path>
+        <path d="M10 8h4"></path>
+        <circle cx="7" cy="16" r="4"></circle>
+        <circle cx="17" cy="16" r="4"></circle>
+        <path d="M11 16h2"></path>
+      </svg>`;
     function setChip(id, value) {
       const chip = document.getElementById(id);
       const val = document.getElementById(`${id}-val`);
@@ -123,6 +177,86 @@
         setChip('chip-host', data.hostname || null);
         setChip('chip-ip', (data.ips || [])[0] || null);
       } catch (_) {}
+    }
+
+    async function fetchAuthStatus() {
+      try {
+        const res = await fetch('/api/auth/status');
+        authState = await res.json();
+      } catch (_) {
+        authState = { role: 'viewer', authenticated: false };
+      }
+      renderAuthState();
+    }
+
+    function renderAuthState() {
+      setChip('chip-auth', authState.role || 'viewer');
+      const btn = document.getElementById('auth-button');
+      if (btn) btn.textContent = authState.authenticated ? 'Lock' : 'Unlock';
+      const canWrite = authState.role === 'operator';
+      const submit = document.getElementById('f-submit');
+      if (submit) {
+        submit.disabled = !canWrite;
+        submit.title = canWrite ? '' : 'Unlock operator mode to create pods';
+      }
+      document.querySelectorAll('[data-write-action], [data-operator-action]').forEach(el => {
+        el.disabled = !canWrite || el.dataset.disabledReason === 'idle';
+      });
+    }
+
+    async function toggleAuth() {
+      if (authState.authenticated) {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        showToast('Dashboard locked');
+        await fetchAuthStatus();
+        fetchStats();
+        return;
+      }
+      openAuthDialog();
+    }
+
+    function openAuthDialog() {
+      const dialog = document.getElementById('auth-dialog');
+      const input = document.getElementById('auth-token');
+      const err = document.getElementById('auth-error');
+      if (!dialog || !input) return;
+      if (err) err.textContent = '';
+      input.value = '';
+      dialog.showModal();
+      input.focus();
+    }
+
+    function closeAuthDialog() {
+      const dialog = document.getElementById('auth-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    function toggleTokenVisibility() {
+      const input = document.getElementById('auth-token');
+      const btn = document.getElementById('auth-token-toggle');
+      if (!input || !btn) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.textContent = input.type === 'password' ? 'Show' : 'Hide';
+    }
+
+    async function submitAuthDialog(ev) {
+      ev.preventDefault();
+      const input = document.getElementById('auth-token');
+      const err = document.getElementById('auth-error');
+      const token = input?.value?.trim();
+      if (!token) return;
+      const body = new URLSearchParams();
+      body.append('token', token);
+      const res = await fetch('/api/auth/login', { method: 'POST', body });
+      if (!res.ok) {
+        if (err) err.textContent = res.status === 429 ? 'Too many attempts. Try again shortly.' : 'Token rejected.';
+        return false;
+      }
+      closeAuthDialog();
+      showToast('Operator mode unlocked');
+      await fetchAuthStatus();
+      fetchStats();
+      return false;
     }
 
     function updateClock() {
@@ -154,12 +288,16 @@
         const cpu = parsePct(c.CPU || c.CPUPerc);
         const mem = parsePct(c.MemPerc);
         const id = (c.ID || c.ContainerID || '').slice(0, 12);
+        const canInstruct = String(c.ActivityState || '').toLowerCase() === 'idle';
+        const canWrite = authState.role === 'operator';
         const actions = (agent && instance) ? `
           <div class="inline">
-            <button onclick="sendAction('restart','${agent}','${instance}')">restart</button>
-            <button onclick="sendAction('stop','${agent}','${instance}')">stop</button>
-            <button onclick="sendAction('start','${agent}','${instance}')">start</button>
-            <button class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
+            <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View terminal" aria-label="View terminal for ${agent}-${instance}" onclick="openTerminal('${agent}','${instance}')">${binocularIcon()}</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('restart','${agent}','${instance}')">restart</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('stop','${agent}','${instance}')">stop</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('start','${agent}','${instance}')">start</button>
+            <button data-write-action data-disabled-reason="${canInstruct ? '' : 'idle'}" ${canWrite && canInstruct ? '' : 'disabled'} title="${canInstruct ? '' : 'pod is not idle'}" onclick="sendInstruction('${agent}','${instance}')">instruct</button>
+            <button data-write-action ${canWrite ? '' : 'disabled'} class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
           </div>` : '';
         return `<tr>
           <td><code>${id}</code></td>
@@ -181,6 +319,154 @@
       if (confirm(`Delete ${agent}-${instance}? This wipes its workspace.`)) sendAction('delete', agent, instance);
     }
 
+    function openTerminal(agent, instance) {
+      const dialog = document.getElementById('terminal-dialog');
+      if (!dialog) return;
+      terminalState.agent = agent;
+      terminalState.instance = instance;
+      document.getElementById('terminal-title').textContent = `${agent}-${instance}`;
+      document.getElementById('terminal-meta').textContent = 'capturing bot tmux pane…';
+      document.getElementById('terminal-empty').hidden = true;
+      document.getElementById('terminal-input').value = '';
+      terminalState.followTail = true;
+      dialog.showModal();
+      initTerminal();
+      fitTerminal();
+      renderTerminalOutput('Loading terminal…');
+      loadTerminal();
+      clearInterval(terminalState.timer);
+      terminalState.timer = setInterval(loadTerminal, 700);
+    }
+
+    function closeTerminal() {
+      clearInterval(terminalState.timer);
+      terminalState.timer = null;
+      const dialog = document.getElementById('terminal-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    async function loadTerminal() {
+      if (!terminalState.agent || !terminalState.instance) return;
+      const meta = document.getElementById('terminal-meta');
+      const previousViewport = terminalState.term?.buffer.active.viewportY || 0;
+      const shouldFollow = terminalState.followTail || isTerminalNearBottom();
+      try {
+        const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+        const res = await fetch(`/api/terminal?${params.toString()}`);
+        const text = await res.text();
+        const empty = document.getElementById('terminal-empty');
+        if (!res.ok) {
+          renderTerminalOutput(res.status === 401 ? 'Unlock operator mode first.' : text, true);
+          meta.textContent = 'capture failed';
+          if (empty) empty.hidden = true;
+          return;
+        }
+        const data = JSON.parse(text);
+        const size = data.rows && data.cols ? ` · ${data.cols}×${data.rows}` : '';
+        meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
+        const noSession = data.status === 'no-session';
+        if (empty) empty.hidden = !noSession;
+        renderTerminalOutput(data.output || '', shouldFollow, previousViewport);
+      } catch (err) {
+        renderTerminalOutput('Network error: ' + err, true);
+        meta.textContent = 'capture failed';
+      }
+    }
+
+    async function startTerminalSession() {
+      const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+      const res = await fetch('/api/terminal/start', { method: 'POST', body });
+      if (!res.ok) {
+        showToast(await res.text(), true);
+        return;
+      }
+      document.getElementById('terminal-empty').hidden = true;
+      terminalState.followTail = true;
+      await loadTerminal();
+    }
+
+    async function sendTerminalLine(ev) {
+      ev.preventDefault();
+      const input = document.getElementById('terminal-input');
+      const value = input.value.trim();
+      if (!value) return false;
+      const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance, input: value });
+      const res = await fetch('/api/terminal/input', { method: 'POST', body });
+      if (!res.ok) {
+        showToast(await res.text(), true);
+        return false;
+      }
+      input.value = '';
+      terminalState.followTail = true;
+      await loadTerminal();
+      return false;
+    }
+
+    function isTerminalNearBottom(el) {
+      const term = terminalState.term;
+      if (!term) return true;
+      const buffer = term.buffer.active;
+      return buffer.baseY - buffer.viewportY < 3;
+    }
+
+    function handleTerminalInputKey(ev) {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        sendTerminalLine(ev);
+      }
+    }
+
+    function initTerminal() {
+      if (terminalState.term) return;
+      const term = new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        fontSize: 12,
+        lineHeight: 1.15,
+        scrollback: 5000,
+        theme: { background: '#000000', foreground: '#e5e7eb', cursor: '#f8fafc' }
+      });
+      terminalState.term = term;
+      term.open(document.getElementById('terminal-output'));
+      term.onScroll(() => {
+        if (!terminalState.rendering) terminalState.followTail = isTerminalNearBottom();
+      });
+      window.addEventListener('resize', fitTerminal);
+    }
+
+    function fitTerminal() {
+      const term = terminalState.term;
+      const el = document.getElementById('terminal-output');
+      if (!term || !el || !el.clientWidth || !el.clientHeight) return;
+      const probe = document.createElement('span');
+      probe.textContent = 'W';
+      probe.style.cssText = 'position:absolute;visibility:hidden;font:12px/1.15 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;';
+      document.body.appendChild(probe);
+      const rect = probe.getBoundingClientRect();
+      probe.remove();
+      const cols = Math.max(40, Math.floor(el.clientWidth / Math.max(rect.width, 7)));
+      const rows = Math.max(8, Math.floor(el.clientHeight / Math.max(rect.height, 14)));
+      if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+    }
+
+    function renderTerminalOutput(raw, follow = terminalState.followTail, previousViewport = 0) {
+      initTerminal();
+      fitTerminal();
+      const term = terminalState.term;
+      terminalState.rendering = true;
+      term.reset();
+      term.write(raw || '', () => {
+        if (follow) {
+          term.scrollToBottom();
+          terminalState.followTail = true;
+        } else {
+          term.scrollToLine(Math.min(previousViewport, term.buffer.active.baseY));
+        }
+        terminalState.rendering = false;
+      });
+    }
+
     async function sendAction(op, agent, instance) {
       const formData = new URLSearchParams();
       formData.append('op', op);
@@ -189,8 +475,25 @@
       try {
         const res = await fetch('/api/action', { method: 'POST', body: formData });
         const text = await res.text();
-        showToast(res.ok ? `${op} ${agent} ${instance}` : text, !res.ok);
+        showToast(res.ok ? `${op} ${agent} ${instance}` : (res.status === 401 ? 'Unlock operator mode first' : text), !res.ok);
         fetchStats();
+      } catch (err) {
+        showToast('Network error: ' + err, true);
+      }
+    }
+
+    async function sendInstruction(agent, instance) {
+      const message = prompt(`Instruction for ${agent}-${instance}`);
+      if (!message || !message.trim()) return;
+      const formData = new URLSearchParams();
+      formData.append('agent', agent);
+      formData.append('instance', instance);
+      formData.append('message', message.trim());
+      try {
+        const res = await fetch('/api/instruct', { method: 'POST', body: formData });
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch (_) { data = { error: text }; }
+        showToast(res.ok ? `Queued instruction ${data.entry?.id || ''}` : (res.status === 401 ? 'Unlock operator mode first' : (data.error || text)), !res.ok);
       } catch (err) {
         showToast('Network error: ' + err, true);
       }
@@ -257,7 +560,7 @@
           fetchStats();
         } else {
           statusEl.textContent = 'failed';
-          outEl.textContent = data.output || data.error || text;
+          outEl.textContent = res.status === 401 ? 'Unlock operator mode first.' : (data.output || data.error || text);
           outEl.style.display = 'block';
           showToast('Create failed — see output below', true);
         }
@@ -271,10 +574,19 @@
     }
 
     fetchInfo();
+    fetchAuthStatus();
     fetchStats();
     loadAgentOptions();
+    document.getElementById('terminal-dialog')?.addEventListener('close', () => {
+      clearInterval(terminalState.timer);
+      terminalState.timer = null;
+    });
+    document.getElementById('terminal-output')?.addEventListener('scroll', ev => {
+      terminalState.followTail = isTerminalNearBottom(ev.currentTarget);
+    });
     setInterval(fetchStats, 3000);
     setInterval(fetchInfo, 30000);
+    setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);
   </script>
 </body>

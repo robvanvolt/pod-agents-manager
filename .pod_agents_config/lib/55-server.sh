@@ -5,6 +5,7 @@
         local server_bin="$server_dir/server"
         local server_pid_file="$server_dir/server.pid"
         local server_log_file="$server_dir/server.log"
+        local server_auth_file="$server_dir/auth.json"
         local builder_image="docker.io/library/golang:1.23-alpine"
 
         # Returns one IPv4 per line. IPv6 is intentionally skipped here — most LAN
@@ -71,26 +72,90 @@
 
         _pod_server_build() {
             local force="${1:-0}"
-            if [ "$force" != "1" ] && [ -x "$server_bin" ] && [ "$server_bin" -nt "$server_dir/main.go" ]; then
+            local _newest_src
+            _newest_src=$(ls -t "$server_dir"/*.go 2>/dev/null | head -n 1)
+            if [ "$force" != "1" ] && [ -x "$server_bin" ] && [ -n "$_newest_src" ] && [ "$server_bin" -nt "$_newest_src" ]; then
                 return 0
             fi
             echo -e "\033[36mBuilding dashboard binary via $builder_image (host has no Go toolchain assumed)...\033[0m"
             # Build with a throwaway builder container; output the static binary to the host fs.
             # `podman unshare chown` is unnecessary because we mount the dir as the user namespace already maps it.
             if command -v go >/dev/null 2>&1; then
-                ( cd "$server_dir" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o server main.go ) || return 1
+                ( cd "$server_dir" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o server . ) || return 1
             else
                 podman run --rm \
                     -v "$server_dir":/src:Z \
                     -w /src \
                     -e CGO_ENABLED=0 \
                     "$builder_image" \
-                    sh -c 'go build -trimpath -ldflags="-s -w" -o server main.go' || return 1
+                    sh -c 'go build -trimpath -ldflags="-s -w" -o server .' || return 1
             fi
             chmod +x "$server_bin"
         }
 
+        _pod_server_random_token() {
+            if command -v openssl >/dev/null 2>&1; then
+                openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+            elif command -v python3 >/dev/null 2>&1; then
+                python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+            else
+                echo "${RANDOM}${RANDOM}$(date +%s)${RANDOM}${RANDOM}"
+            fi
+        }
+
+        _pod_server_token_hash() {
+            local _token="$1"
+            if command -v sha256sum >/dev/null 2>&1; then
+                printf '%s' "$_token" | sha256sum | awk '{print $1}'
+            elif command -v shasum >/dev/null 2>&1; then
+                printf '%s' "$_token" | shasum -a 256 | awk '{print $1}'
+            elif command -v python3 >/dev/null 2>&1; then
+                python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$_token"
+            else
+                echo ""
+            fi
+        }
+
+        _pod_server_write_token() {
+            local _token="$1"
+            local _hash _now
+            _hash="$(_pod_server_token_hash "$_token")"
+            [ -n "$_hash" ] || { echo -e "\033[31mCould not compute token hash; install sha256sum, shasum, or python3.\033[0m"; return 1; }
+            _now="$(date -Iseconds 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S%z')"
+            mkdir -p "$server_dir"
+            cat > "$server_auth_file" <<EOF
+{
+  "bootstrap_token_sha256": "$_hash",
+  "created_at": "$_now",
+  "updated_at": "$_now",
+  "sessions": []
+}
+EOF
+            chmod 0600 "$server_auth_file" 2>/dev/null || true
+        }
+
+        _pod_server_rotate_token() {
+            local _token
+            _token="$(_pod_server_random_token)"
+            _pod_server_write_token "$_token" || return 1
+            echo -e "\033[32mDashboard operator token rotated.\033[0m"
+            echo -e "\033[33mSave this token now; it is shown only once:\033[0m"
+            printf '%s\n' "$_token"
+        }
+
         case "$sub" in
+            token)
+                case "${3:-}" in
+                    rotate)
+                        _pod_server_rotate_token
+                        return $?
+                        ;;
+                    *)
+                        echo "Usage: pod server token rotate"
+                        return 1
+                        ;;
+                esac
+                ;;
             start)
                 [ -d "$server_dir" ] || { echo -e "\033[31mServer directory not found at $server_dir.\033[0m"; return 1; }
                 [ -f "$server_dir/main.go" ] || { echo -e "\033[31mmain.go not found in $server_dir.\033[0m"; return 1; }
@@ -125,6 +190,12 @@
                 fi
 
                 _pod_server_build || return 1
+
+                if [ ! -f "$server_auth_file" ]; then
+                    echo -e "\033[33mNo dashboard operator token found; generating one now.\033[0m"
+                    _pod_server_rotate_token || return 1
+                    echo ""
+                fi
 
                 # Visual separator in the log so each run is easy to spot when tailing.
                 printf '\n=== %s — pod server start ===\n' "$(date -Iseconds 2>/dev/null || date)" >> "$server_log_file"
@@ -225,7 +296,7 @@
                 return $?
                 ;;
             *)
-                echo "Usage: pod server {start|stop|restart|status|logs|build}"
+                echo "Usage: pod server {start|stop|restart|status|logs|build|token rotate}"
                 return 1
                 ;;
         esac

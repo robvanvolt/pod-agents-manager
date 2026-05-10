@@ -1,5 +1,11 @@
 AGENT_VOLUME_CONFIG_PATH="/root/.config/nanocoder"
 
+# Non-interactive prompt mode for `pod batch` and `pod test`.
+# `nanocoder run <prompt>` is the documented one-shot subcommand.
+# `--trust-directory` skips the first-run trust dialog that would
+# otherwise hang non-interactive runs.
+AGENT_BATCH_INVOKE='nanocoder --trust-directory run "$PROMPT"'
+
 agent_build_containerfile() {
     local build_dir="$1"
     local flavor="$2"

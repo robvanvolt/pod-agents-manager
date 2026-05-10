@@ -19,7 +19,7 @@
 
 Running half a dozen local coding agents in parallel — Claude Code in one window, OpenCode in another, a Crush instance churning through a refactor — usually means six terminals, six workspaces stomping each other, and no idea which one is actually doing work. `pod` turns any Linux box with rootless Podman into a multi-tenant home for those agents: each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
 
-Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and Little-Coder. A small Go-backed web dashboard exposes the same control surface over the LAN.
+Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, and Nanocoder. A small Go-backed web dashboard exposes the same control surface over the LAN.
 
 <div align="center">
   <img src="static/screenshots/dashboard.png" alt="Pod Agents Manager dashboard" width="720" />
@@ -184,6 +184,7 @@ Inbox          pod inbox [agent instance] [--json|--clear]
                pod instruct <agent> <instance> <instruction...>
                pod ask <agent> <instance> "Question?" --option A --option B
 Dashboard      pod server start | stop | restart | status | logs | build
+               pod server token rotate
 Diagnostics    pod doctor
 Defaults       pod base <alpine|trixie-slim|...>
 ```
@@ -239,7 +240,13 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /` | Single-page dashboard |
 | `GET /api/stats` | Cached `podman stats --all --no-stream` JSON, refreshed every 3s |
 | `GET /api/info` | Hostname, LAN IPs, server time |
+| `GET /api/auth/status` | Current dashboard role and passkey readiness |
+| `POST /api/auth/login` | Unlock operator mode with the local bootstrap token |
+| `POST /api/auth/logout` | End the operator session |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
+| `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
+| `POST /api/terminal/start` | Start the pod's detached `bot` tmux agent session |
+| `POST /api/terminal/input` | Send input to the pod's `bot` tmux pane |
 | `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
 | `POST /api/instruct` | Queue a follow-up instruction into `~/.pod_agents_config/inbox/` |
 | `POST /api/pods/{agent}/{instance}/instructions` | REST-shaped alias for queuing pod instructions |
@@ -249,7 +256,44 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 `GET /api/stats` also adds `ActivityState` and `ActivityDetail` to managed pods
 so the dashboard can show whether an agent looks idle or busy. The first-pass
 heuristic checks CPU activity and the foreground tmux command in the pod's
-`bot` session.
+`bot` session, then inspects the recent pane output so low-CPU agent CLIs that
+are waiting at a prompt are shown as idle.
+
+The dashboard action bar includes a binoculars **View terminal** button. It
+opens a terminal overlay that follows the pod's `bot` tmux pane, can start the
+agent session when none exists, and can send input to the agent without SSHing
+into the host. The browser terminal uses vendored `@xterm/xterm`
+`6.1.0-beta.216` assets; exact `6.1.0` was not published on npm when this was
+added. Web-started sessions do not drop into a shell after the agent exits, and
+terminal input is rejected if the pane is only a shell.
+
+Dashboard writes are protected by a local operator token. Viewers can load the
+dashboard and inspect stats without a login; creating, deleting, starting,
+stopping, restarting, and queuing instructions requires unlocking operator mode.
+
+```bash
+pod server token rotate   # prints a one-time operator token
+pod server restart
+```
+
+Operator sessions are stored as HttpOnly cookies, token hashes and sessions live
+in `~/.pod_agents_config/server/auth.json`, and write attempts are appended to
+`~/.pod_agents_config/server/audit.jsonl`. `GET /api/auth/status` advertises the
+planned SimpleWebAuthn package pair (`@simplewebauthn/browser` and
+`@simplewebauthn/server`) so passkeys can plug into the same role/session model.
+Dashboard writes also reject cross-origin POSTs and `/api/auth/login` is
+rate-limited per client IP before token verification.
+
+**First-time auth setup.** The dashboard starts in viewer mode: stats and pod
+lists are visible, but write actions are locked. To unlock operator mode:
+
+```bash
+pod server token rotate    # prints a one-time bootstrap token
+```
+
+Click **Unlock** in the dashboard and paste the token. The session lasts 24
+hours per browser. Lost the token? Run `pod server token rotate` again; active
+sessions stay valid until they expire.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 
@@ -426,5 +470,5 @@ Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).
 ## Acknowledgements
 
 - [Podman](https://podman.io/) and [Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) — rootless, daemonless, systemd-native containers.
-- The agent CLIs themselves: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), [OpenCode](https://github.com/opencode-ai/opencode), [Crush](https://github.com/charmbracelet/crush), [Pi](https://github.com/mariozechner/pi-coding-agent), [Hermes](https://nousresearch.com/), [Nanocoder](https://github.com/Nano-Collective/nanocoder), [Little-Coder](https://github.com/itayinbarr/little-coder).
+- The agent CLIs themselves: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), [OpenCode](https://github.com/opencode-ai/opencode), [Crush](https://github.com/charmbracelet/crush), [Pi](https://github.com/mariozechner/pi-coding-agent), [Hermes](https://nousresearch.com/), [Nanocoder](https://github.com/Nano-Collective/nanocoder).
 - Local-inference projects that made running these agents on your own hardware viable: [llama.cpp](https://github.com/ggerganov/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/).
