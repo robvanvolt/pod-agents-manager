@@ -46,7 +46,7 @@ func main() {
 
 	root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir("./static")))
+	mux.Handle("/", noCache(http.FileServer(http.Dir("./static"))))
 
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		cacheMutex.RLock()
@@ -431,6 +431,15 @@ func listByExt(dir, ext string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func readDefaultBase(root string) string {
