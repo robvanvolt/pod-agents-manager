@@ -1,5 +1,10 @@
 AGENT_VOLUME_CONFIG_PATH="/opt/data"
 
+# Non-interactive prompt mode for `pod batch` and `pod test`.
+# `hermes chat -q PROMPT` is the documented one-shot path; `-Q` suppresses
+# the banner/spinner so stdout is just the response (parseable by tests).
+AGENT_BATCH_INVOKE='hermes chat -Q -q "$PROMPT"'
+
 agent_pre_update() {
     podman pull docker.io/nousresearch/hermes-agent:latest
 }
