@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,8 +29,15 @@ var (
 	statsCache           []byte
 	cacheMutex           sync.RWMutex
 	authMutex            sync.Mutex
+	loginRateMutex       sync.Mutex
+	loginRateAttempts    = map[string]*loginRateState{}
 	activityBusyCPUPct   = 1.0
 	activityProbeTimeout = 900 * time.Millisecond
+)
+
+const (
+	loginRateWindow      = time.Minute
+	loginRateMaxAttempts = 10
 )
 
 func main() {
@@ -84,6 +92,14 @@ func main() {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if !requireSameOriginWrite(w, r, root, "auth.login", "", "viewer") {
+			return
+		}
+		if !reserveLoginAttempt(r) {
+			appendAudit(root, auditEntryFromRequest(r, "auth.login", "", "rate_limited", "too many login attempts", "viewer"))
+			http.Error(w, "too many login attempts", http.StatusTooManyRequests)
+			return
+		}
 		token, err := readLoginToken(r)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -91,11 +107,15 @@ func main() {
 		}
 		session, err := verifyBootstrapTokenAndCreateSession(root, token, r)
 		if err != nil {
+			if delay := recordLoginFailure(r); delay > 0 {
+				time.Sleep(delay)
+			}
 			appendAudit(root, auditEntryFromRequest(r, "auth.login", "", "denied", err.Error(), "viewer"))
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
-		setSessionCookie(w, session)
+		recordLoginSuccess(r)
+		setSessionCookie(w, r, session)
 		appendAudit(root, auditEntryFromRequest(r, "auth.login", "", "ok", "", "operator"))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "role": "operator"})
@@ -107,10 +127,13 @@ func main() {
 			return
 		}
 		role := currentAuthContext(r, root).Role
+		if !requireSameOriginWrite(w, r, root, "auth.logout", "", role) {
+			return
+		}
 		if session := sessionTokenFromRequest(r); session != "" {
 			revokeSession(root, session)
 		}
-		clearSessionCookie(w)
+		clearSessionCookie(w, r)
 		appendAudit(root, auditEntryFromRequest(r, "auth.logout", "", "ok", "", role))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
@@ -594,6 +617,13 @@ type authContext struct {
 	Role string
 }
 
+type loginRateState struct {
+	WindowStart time.Time
+	Attempts    int
+	Failures    int
+	LastSeen    time.Time
+}
+
 type authState struct {
 	BootstrapTokenSHA256 string        `json:"bootstrap_token_sha256"`
 	CreatedAt            string        `json:"created_at"`
@@ -652,12 +682,164 @@ func currentAuthContext(r *http.Request, root string) authContext {
 
 func requireOperator(w http.ResponseWriter, r *http.Request, root, action, target string) (authContext, bool) {
 	auth := currentAuthContext(r, root)
+	if !requireSameOriginWrite(w, r, root, action, target, auth.Role) {
+		return auth, false
+	}
 	if auth.Role == "operator" {
 		return auth, true
 	}
 	appendAudit(root, auditEntryFromRequest(r, action, target, "denied", "operator role required", auth.Role))
 	http.Error(w, "operator role required", http.StatusUnauthorized)
 	return auth, false
+}
+
+func requireSameOriginWrite(w http.ResponseWriter, r *http.Request, root, action, target, role string) bool {
+	if err := validateWriteOrigin(r); err != nil {
+		appendAudit(root, auditEntryFromRequest(r, action, target, "csrf_blocked", err.Error(), role))
+		http.Error(w, "cross-origin write blocked", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func validateWriteOrigin(r *http.Request) error {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		fetchSite := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+		if fetchSite == "" || fetchSite == "same-origin" {
+			return nil
+		}
+		return fmt.Errorf("missing Origin with Sec-Fetch-Site=%s", fetchSite)
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid Origin")
+	}
+	if originAllowedForRequest(u, r) {
+		return nil
+	}
+	return fmt.Errorf("Origin %s does not match Host %s", u.Host, r.Host)
+}
+
+func originAllowedForRequest(origin *url.URL, r *http.Request) bool {
+	if sameHostPort(origin.Host, r.Host) {
+		return true
+	}
+	originHost, originPort := splitHostPortLoose(origin.Host)
+	if originPort == "" {
+		originPort = defaultPortForScheme(origin.Scheme)
+	}
+	_, requestPort := splitHostPortLoose(r.Host)
+	if requestPort == "" {
+		if r.TLS != nil {
+			requestPort = "443"
+		} else {
+			requestPort = "80"
+		}
+	}
+	if originPort != requestPort {
+		return false
+	}
+	originHost = strings.Trim(strings.ToLower(originHost), "[]")
+	for _, allowed := range append(localIPs(), "127.0.0.1", "localhost", "::1") {
+		if originHost == strings.Trim(strings.ToLower(allowed), "[]") {
+			return true
+		}
+	}
+	if host, err := os.Hostname(); err == nil && host != "" && originHost == strings.ToLower(host) {
+		return true
+	}
+	return false
+}
+
+func sameHostPort(a, b string) bool {
+	aHost, aPort := splitHostPortLoose(a)
+	bHost, bPort := splitHostPortLoose(b)
+	return strings.EqualFold(strings.Trim(aHost, "[]"), strings.Trim(bHost, "[]")) && aPort == bPort
+}
+
+func splitHostPortLoose(hostport string) (string, string) {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return "", ""
+	}
+	if host, port, err := net.SplitHostPort(hostport); err == nil {
+		return host, port
+	}
+	if strings.HasPrefix(hostport, "[") && strings.Contains(hostport, "]") {
+		end := strings.Index(hostport, "]")
+		host := hostport[1:end]
+		rest := hostport[end+1:]
+		if strings.HasPrefix(rest, ":") {
+			return host, strings.TrimPrefix(rest, ":")
+		}
+		return host, ""
+	}
+	if strings.Count(hostport, ":") == 1 {
+		parts := strings.SplitN(hostport, ":", 2)
+		return parts[0], parts[1]
+	}
+	return hostport, ""
+}
+
+func defaultPortForScheme(scheme string) string {
+	switch strings.ToLower(scheme) {
+	case "https":
+		return "443"
+	default:
+		return "80"
+	}
+}
+
+func reserveLoginAttempt(r *http.Request) bool {
+	ip := rateLimitIP(r)
+	now := time.Now()
+
+	loginRateMutex.Lock()
+	defer loginRateMutex.Unlock()
+
+	state := loginRateAttempts[ip]
+	if state == nil || now.Sub(state.WindowStart) >= loginRateWindow {
+		state = &loginRateState{WindowStart: now}
+		loginRateAttempts[ip] = state
+	}
+	state.LastSeen = now
+	if state.Attempts >= loginRateMaxAttempts {
+		return false
+	}
+	state.Attempts++
+	return true
+}
+
+func recordLoginFailure(r *http.Request) time.Duration {
+	ip := rateLimitIP(r)
+	now := time.Now()
+
+	loginRateMutex.Lock()
+	defer loginRateMutex.Unlock()
+
+	state := loginRateAttempts[ip]
+	if state == nil {
+		state = &loginRateState{WindowStart: now}
+		loginRateAttempts[ip] = state
+	}
+	state.Failures++
+	state.LastSeen = now
+	if state.Failures < 5 {
+		return 0
+	}
+	exp := state.Failures - 5
+	if exp > 4 {
+		exp = 4
+	}
+	return time.Duration(1<<exp) * time.Second
+}
+
+func recordLoginSuccess(r *http.Request) {
+	ip := rateLimitIP(r)
+	loginRateMutex.Lock()
+	defer loginRateMutex.Unlock()
+	delete(loginRateAttempts, ip)
 }
 
 func readLoginToken(r *http.Request) (string, error) {
@@ -800,26 +982,32 @@ func sessionTokenFromRequest(r *http.Request) string {
 	return ""
 }
 
-func setSessionCookie(w http.ResponseWriter, token string) {
+func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "pod_session",
 		Value:    token,
 		Path:     "/",
 		MaxAge:   24 * 60 * 60,
 		HttpOnly: true,
+		Secure:   secureCookie(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "pod_session",
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   secureCookie(r),
 		SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func secureCookie(r *http.Request) bool {
+	return r.TLS != nil || os.Getenv("POD_SERVER_FORCE_SECURE_COOKIE") == "1"
 }
 
 func appendAudit(root string, entry auditEntry) {
@@ -869,6 +1057,14 @@ func clientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+func rateLimitIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
 type inboxEntry struct {
 	ID        string   `json:"id"`
 	CreatedAt string   `json:"created_at"`
@@ -903,6 +1099,9 @@ func handleInstruct(w http.ResponseWriter, r *http.Request, root string, auth au
 }
 
 func handleInstructForTarget(w http.ResponseWriter, r *http.Request, root, agent, instance string, auth authContext) {
+	if !requireSameOriginWrite(w, r, root, "instruct", agent+"-"+instance, auth.Role) {
+		return
+	}
 	if auth.Role != "operator" {
 		appendAudit(root, auditEntryFromRequest(r, "instruct", agent+"-"+instance, "denied", "operator role required", auth.Role))
 		http.Error(w, "operator role required", http.StatusUnauthorized)

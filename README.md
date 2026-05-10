@@ -269,6 +269,19 @@ in `~/.pod_agents_config/server/auth.json`, and write attempts are appended to
 `~/.pod_agents_config/server/audit.jsonl`. `GET /api/auth/status` advertises the
 planned SimpleWebAuthn package pair (`@simplewebauthn/browser` and
 `@simplewebauthn/server`) so passkeys can plug into the same role/session model.
+Dashboard writes also reject cross-origin POSTs and `/api/auth/login` is
+rate-limited per client IP before token verification.
+
+**First-time auth setup.** The dashboard starts in viewer mode: stats and pod
+lists are visible, but write actions are locked. To unlock operator mode:
+
+```bash
+pod server token rotate    # prints a one-time bootstrap token
+```
+
+Click **Unlock** in the dashboard and paste the token. The session lasts 24
+hours per browser. Lost the token? Run `pod server token rotate` again; active
+sessions stay valid until they expire.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 

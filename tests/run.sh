@@ -648,6 +648,64 @@ t_server_token_rotate_writes_auth() {
     return 0
 }
 
+t_server_auth_login_curl_integration() {
+    if [ "${POD_RUN_SERVER_INTEGRATION:-0}" != "1" ]; then
+        printf '  set POD_RUN_SERVER_INTEGRATION=1 to run the live curl auth smoke\n'
+        return 0
+    fi
+    command -v go >/dev/null 2>&1 || { echo "  go is required" >&2; return 1; }
+    command -v curl >/dev/null 2>&1 || { echo "  curl is required" >&2; return 1; }
+
+    local sandbox out token port server_dir pid_file cookies code audit_file
+    sandbox=$(setup_sandbox)
+    server_dir="$sandbox/.pod_agents_config/server"
+    audit_file="$server_dir/audit.jsonl"
+    cookies="$sandbox/cookies.txt"
+    port=$((19000 + (RANDOM % 20000)))
+
+    out=$(run_pod_in_sandbox "$sandbox" server token rotate 2>&1) || {
+        echo "$out" | sed 's/^/    /' >&2
+        rm -rf "$sandbox"
+        return 1
+    }
+    token=$(printf '%s\n' "$out" | tail -n 1)
+    ( cd .pod_agents_config/server && GOCACHE="${TMPDIR:-/tmp}/pod-agents-go-cache" GO111MODULE=off go build -o "$server_dir/server" . ) || {
+        rm -rf "$sandbox"
+        return 1
+    }
+
+    ( cd "$server_dir" && HOME="$sandbox" POD_SERVER_PORT="$port" ./server >/tmp/pod-agents-test-server.log 2>&1 & echo "$!" > "$server_dir/test.pid" )
+    pid_file="$server_dir/test.pid"
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        curl -fsS "http://127.0.0.1:${port}/api/auth/status" >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+
+    code=$(curl -sS -o "$sandbox/login.out" -w "%{http_code}" -c "$cookies" \
+        -X POST --data-urlencode "token=$token" \
+        "http://127.0.0.1:${port}/api/auth/login")
+    if [ -f "$pid_file" ]; then kill "$(cat "$pid_file")" 2>/dev/null || true; fi
+    if [ "$code" != "200" ]; then
+        echo "  login returned HTTP $code" >&2
+        cat "$sandbox/login.out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if [ ! -s "$cookies" ] || ! grep -q 'pod_session' "$cookies"; then
+        echo "  login did not set pod_session cookie" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    if ! grep -q '"action":"auth.login"' "$audit_file" || ! grep -q '"result":"ok"' "$audit_file"; then
+        echo "  audit log missing auth.login ok entry" >&2
+        [ -f "$audit_file" ] && cat "$audit_file" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+    rm -rf "$sandbox"
+    return 0
+}
+
 # ---------------------------------------------------------------------------
 
 echo "==> pod-agents-manager test suite"
@@ -703,6 +761,7 @@ run_test "inbox: ask queues options"           t_inbox_ask_queues_options
 run_test "test: no args prints usage"          t_test_no_args_prints_usage
 run_test "test: --all errors w/o server"       t_test_all_errors_when_server_not_running
 run_test "server: token rotate writes auth"    t_server_token_rotate_writes_auth
+run_test "server: auth login curl integration" t_server_auth_login_curl_integration
 
 echo
 echo "==> Summary: $passes passed, $fails failed"

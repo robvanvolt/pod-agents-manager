@@ -25,8 +25,26 @@
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
         <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
-    </div>
+  </div>
   <div id="toast" class="toast"></div>
+  <dialog id="auth-dialog" class="auth-dialog">
+    <form method="dialog" class="auth-panel" onsubmit="return submitAuthDialog(event)">
+      <div class="auth-head">
+        <h2>Unlock Operator Mode</h2>
+        <button type="button" aria-label="Close" onclick="closeAuthDialog()">×</button>
+      </div>
+      <label for="auth-token">Operator token</label>
+      <div class="auth-input-row">
+        <input id="auth-token" name="token" type="password" autocomplete="current-password">
+        <button type="button" id="auth-token-toggle" onclick="toggleTokenVisibility()">Show</button>
+      </div>
+      <p id="auth-error" class="auth-error" aria-live="polite"></p>
+      <div class="auth-actions">
+        <button type="button" onclick="closeAuthDialog()">Cancel</button>
+        <button type="submit" class="primary">Unlock</button>
+      </div>
+    </form>
+  </dialog>
 
   <div class="card">
   <table>
@@ -162,18 +180,51 @@
         fetchStats();
         return;
       }
-      const token = prompt('Dashboard operator token');
+      openAuthDialog();
+    }
+
+    function openAuthDialog() {
+      const dialog = document.getElementById('auth-dialog');
+      const input = document.getElementById('auth-token');
+      const err = document.getElementById('auth-error');
+      if (!dialog || !input) return;
+      if (err) err.textContent = '';
+      input.value = '';
+      dialog.showModal();
+      input.focus();
+    }
+
+    function closeAuthDialog() {
+      const dialog = document.getElementById('auth-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    function toggleTokenVisibility() {
+      const input = document.getElementById('auth-token');
+      const btn = document.getElementById('auth-token-toggle');
+      if (!input || !btn) return;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      btn.textContent = input.type === 'password' ? 'Show' : 'Hide';
+    }
+
+    async function submitAuthDialog(ev) {
+      ev.preventDefault();
+      const input = document.getElementById('auth-token');
+      const err = document.getElementById('auth-error');
+      const token = input?.value?.trim();
       if (!token) return;
       const body = new URLSearchParams();
-      body.append('token', token.trim());
+      body.append('token', token);
       const res = await fetch('/api/auth/login', { method: 'POST', body });
       if (!res.ok) {
-        showToast('Unlock failed', true);
-        return;
+        if (err) err.textContent = res.status === 429 ? 'Too many attempts. Try again shortly.' : 'Token rejected.';
+        return false;
       }
+      closeAuthDialog();
       showToast('Operator mode unlocked');
       await fetchAuthStatus();
       fetchStats();
+      return false;
     }
 
     function updateClock() {
