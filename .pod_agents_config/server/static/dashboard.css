@@ -119,6 +119,41 @@ body {
     color: #04111b; border-color: rgba(104,225,253,.5);
 }
 
+.terminal-dialog {
+    width: min(96vw, 1040px);
+    height: min(86vh, 760px);
+    border: 1px solid rgba(104,225,253,.32);
+    border-radius: .9rem;
+    padding: 0;
+    background: #050914;
+    color: var(--text);
+    box-shadow: 0 24px 80px rgba(0,0,0,.42);
+}
+.terminal-dialog::backdrop { background: rgba(3, 7, 18, .78); backdrop-filter: blur(6px); }
+.terminal-panel { height: 100%; display: flex; flex-direction: column; }
+.terminal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+    padding: .85rem 1rem;
+    border-bottom: 1px solid rgba(148,163,184,.18);
+    background: linear-gradient(180deg, rgba(104,225,253,.08), rgba(15,23,42,.45));
+}
+.terminal-head h2 { margin: 0; font-size: 1rem; letter-spacing: 0; }
+.terminal-head p { margin: .18rem 0 0; color: var(--muted); font-size: .76rem; }
+.terminal-head button { width: 2rem; height: 2rem; padding: 0; }
+.terminal-screen {
+    flex: 1;
+    margin: 0;
+    overflow: auto;
+    padding: 1rem;
+    background:
+        linear-gradient(rgba(255,255,255,.025) 50%, transparent 50%) 0 0 / 100% 2.4rem,
+        #030712;
+    color: #d6f7ff;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .card {
     margin-top: 1rem; border: 1px solid var(--panel-border); border-radius: 1rem;
     background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)), var(--panel);
@@ -139,6 +174,17 @@ button {
 button:hover { border-color: rgba(104,225,253,.48); color: var(--brand); }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button:disabled:hover { border-color: rgba(148,163,184,.24); color: #eef5ff; }
+.icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; min-width: 2rem; height: 1.82rem; padding: 0;
+}
+.icon-btn svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
 .danger { border-color: rgba(248,113,113,.5); color: #fecaca; }
 .danger:hover { border-color: #f87171; color: #fee2e2; }
 
@@ -205,4 +251,6 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     .topbar { flex-direction: column; align-items: flex-start; }
     .chips { justify-content: flex-start; }
     th, td { font-size: .74rem; }
+    .terminal-dialog { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+    .terminal-screen { font-size: 11px; }
 }

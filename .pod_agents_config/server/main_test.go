@@ -59,6 +59,20 @@ func TestClassifyLowCPUForegroundCommandAsRunning(t *testing.T) {
 	}
 }
 
+func TestSplitTerminalProbeOutput(t *testing.T) {
+	header, capture := splitTerminalProbeOutput("pi|42|120\n---POD_TERMINAL_CAPTURE---\nhello\n")
+	if header != "pi|42|120" || capture != "hello\n" {
+		t.Fatalf("got header=%q capture=%q", header, capture)
+	}
+}
+
+func TestTrimTerminalOutput(t *testing.T) {
+	got := trimTerminalOutput("\n\nhello\n\n")
+	if got != "hello" {
+		t.Fatalf("got %q, want hello", got)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {

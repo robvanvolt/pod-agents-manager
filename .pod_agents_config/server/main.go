@@ -271,6 +271,31 @@ func main() {
 		})
 	})
 
+	mux.HandleFunc("/api/terminal", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth := currentAuthContext(r, root)
+		if auth.Role != "operator" {
+			http.Error(w, "operator role required", http.StatusUnauthorized)
+			return
+		}
+		agent := strings.TrimSpace(r.URL.Query().Get("agent"))
+		instance := strings.TrimSpace(r.URL.Query().Get("instance"))
+		if !validIdent(agent) || !validIdent(instance) {
+			http.Error(w, "invalid agent/instance", http.StatusBadRequest)
+			return
+		}
+		snapshot, err := captureTerminal(agent+"-"+instance, 180)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(snapshot)
+	})
+
 	mux.HandleFunc("/api/inbox", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -567,6 +592,86 @@ func classifyLowCPUActivity(command, capture string) (string, string) {
 	}
 }
 
+func captureTerminal(container string, lines int) (terminalSnapshot, error) {
+	snapshot := terminalSnapshot{
+		Status:     "ok",
+		Container:  container,
+		CapturedAt: time.Now().Format(time.RFC3339),
+	}
+	if agent, instance, ok := splitContainerName(container); ok {
+		snapshot.Agent = agent
+		snapshot.Instance = instance
+	}
+	if lines <= 0 || lines > 500 {
+		lines = 180
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	script := fmt.Sprintf(`if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}|#{pane_height}|#{pane_width}"; printf '\n---POD_TERMINAL_CAPTURE---\n'; tmux capture-pane -p -t bot:0.0 -S -%d; else printf 'no-session||\n---POD_TERMINAL_CAPTURE---\n'; fi`, lines)
+	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return snapshot, fmt.Errorf("terminal capture timed out")
+	}
+	if err != nil {
+		return snapshot, fmt.Errorf("%s", strings.TrimSpace(stripANSI(string(out))))
+	}
+
+	header, capture := splitTerminalProbeOutput(string(out))
+	fields := strings.SplitN(header, "|", 3)
+	if len(fields) > 0 {
+		snapshot.Command = strings.TrimSpace(fields[0])
+	}
+	if len(fields) > 1 {
+		snapshot.Rows = strings.TrimSpace(fields[1])
+	}
+	if len(fields) > 2 {
+		snapshot.Cols = strings.TrimSpace(fields[2])
+	}
+	if snapshot.Command == "" || snapshot.Command == "no-session" {
+		snapshot.Status = "idle"
+	}
+	snapshot.Output = trimTerminalOutput(capture)
+	return snapshot, nil
+}
+
+func splitTerminalProbeOutput(out string) (string, string) {
+	parts := strings.SplitN(out, "\n---POD_TERMINAL_CAPTURE---\n", 2)
+	header := strings.TrimSpace(stripANSI(parts[0]))
+	if len(parts) == 1 {
+		return header, ""
+	}
+	return header, stripANSI(parts[1])
+}
+
+func splitContainerName(name string) (string, string, bool) {
+	dash := strings.LastIndex(name, "-")
+	if dash <= 0 || dash >= len(name)-1 {
+		return "", "", false
+	}
+	agent := name[:dash]
+	instance := name[dash+1:]
+	if !validIdent(agent) || !validIdent(instance) {
+		return "", "", false
+	}
+	return agent, instance, true
+}
+
+func trimTerminalOutput(output string) string {
+	lines := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return "(no terminal output captured)"
+	}
+	return strings.Join(lines, "\n")
+}
+
 func captureLooksIdle(capture string) bool {
 	lines := recentNonEmptyLines(capture, 8)
 	for _, line := range lines {
@@ -674,6 +779,18 @@ type loginRateState struct {
 	Attempts    int
 	Failures    int
 	LastSeen    time.Time
+}
+
+type terminalSnapshot struct {
+	Status     string `json:"status"`
+	Agent      string `json:"agent"`
+	Instance   string `json:"instance"`
+	Container  string `json:"container"`
+	Command    string `json:"command"`
+	Rows       string `json:"rows,omitempty"`
+	Cols       string `json:"cols,omitempty"`
+	Output     string `json:"output"`
+	CapturedAt string `json:"captured_at"`
 }
 
 type authState struct {

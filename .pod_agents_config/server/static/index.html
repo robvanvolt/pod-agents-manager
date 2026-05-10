@@ -45,6 +45,18 @@
       </div>
     </form>
   </dialog>
+  <dialog id="terminal-dialog" class="terminal-dialog">
+    <div class="terminal-panel">
+      <div class="terminal-head">
+        <div>
+          <h2 id="terminal-title">Terminal</h2>
+          <p id="terminal-meta">waiting for capture</p>
+        </div>
+        <button type="button" aria-label="Close terminal" onclick="closeTerminal()">×</button>
+      </div>
+      <pre id="terminal-output" class="terminal-screen">Loading terminal…</pre>
+    </div>
+  </dialog>
 
   <div class="card">
   <table>
@@ -81,6 +93,7 @@
 
   <script>
     let authState = { role: 'viewer', authenticated: false };
+    let terminalState = { agent: '', instance: '', timer: null };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -127,6 +140,16 @@
       const title = String(detail || '').replace(/"/g, '&quot;');
       return `<span class="activity-badge ${safeState}" title="${title}"><span></span>${label}</span>`;
     };
+    const binocularIcon = () => `
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
+        <path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path>
+        <path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path>
+        <path d="M9 5h6"></path>
+        <path d="M10 8h4"></path>
+        <circle cx="7" cy="16" r="4"></circle>
+        <circle cx="17" cy="16" r="4"></circle>
+        <path d="M11 16h2"></path>
+      </svg>`;
 
     function setChip(id, value) {
       const chip = document.getElementById(id);
@@ -167,7 +190,7 @@
         submit.disabled = !canWrite;
         submit.title = canWrite ? '' : 'Unlock operator mode to create pods';
       }
-      document.querySelectorAll('[data-write-action]').forEach(el => {
+      document.querySelectorAll('[data-write-action], [data-operator-action]').forEach(el => {
         el.disabled = !canWrite || el.dataset.disabledReason === 'idle';
       });
     }
@@ -260,6 +283,7 @@
         const canWrite = authState.role === 'operator';
         const actions = (agent && instance) ? `
           <div class="inline">
+            <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View terminal" aria-label="View terminal for ${agent}-${instance}" onclick="openTerminal('${agent}','${instance}')">${binocularIcon()}</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('restart','${agent}','${instance}')">restart</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('stop','${agent}','${instance}')">stop</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('start','${agent}','${instance}')">start</button>
@@ -284,6 +308,51 @@
 
     function confirmDelete(agent, instance) {
       if (confirm(`Delete ${agent}-${instance}? This wipes its workspace.`)) sendAction('delete', agent, instance);
+    }
+
+    function openTerminal(agent, instance) {
+      const dialog = document.getElementById('terminal-dialog');
+      if (!dialog) return;
+      terminalState.agent = agent;
+      terminalState.instance = instance;
+      document.getElementById('terminal-title').textContent = `${agent}-${instance}`;
+      document.getElementById('terminal-meta').textContent = 'capturing bot tmux pane…';
+      document.getElementById('terminal-output').textContent = 'Loading terminal…';
+      dialog.showModal();
+      loadTerminal();
+      clearInterval(terminalState.timer);
+      terminalState.timer = setInterval(loadTerminal, 1500);
+    }
+
+    function closeTerminal() {
+      clearInterval(terminalState.timer);
+      terminalState.timer = null;
+      const dialog = document.getElementById('terminal-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    async function loadTerminal() {
+      if (!terminalState.agent || !terminalState.instance) return;
+      const out = document.getElementById('terminal-output');
+      const meta = document.getElementById('terminal-meta');
+      try {
+        const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+        const res = await fetch(`/api/terminal?${params.toString()}`);
+        const text = await res.text();
+        if (!res.ok) {
+          out.textContent = res.status === 401 ? 'Unlock operator mode first.' : text;
+          meta.textContent = 'capture failed';
+          return;
+        }
+        const data = JSON.parse(text);
+        const size = data.rows && data.cols ? ` · ${data.cols}×${data.rows}` : '';
+        meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
+        out.textContent = data.output || '(no terminal output captured)';
+        out.scrollTop = out.scrollHeight;
+      } catch (err) {
+        out.textContent = 'Network error: ' + err;
+        meta.textContent = 'capture failed';
+      }
     }
 
     async function sendAction(op, agent, instance) {
@@ -396,6 +465,10 @@
     fetchAuthStatus();
     fetchStats();
     loadAgentOptions();
+    document.getElementById('terminal-dialog')?.addEventListener('close', () => {
+      clearInterval(terminalState.timer);
+      terminalState.timer = null;
+    });
     setInterval(fetchStats, 3000);
     setInterval(fetchInfo, 30000);
     setInterval(fetchAuthStatus, 30000);
