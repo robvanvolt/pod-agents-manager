@@ -253,7 +253,8 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 `GET /api/stats` also adds `ActivityState` and `ActivityDetail` to managed pods
 so the dashboard can show whether an agent looks idle or busy. The first-pass
 heuristic checks CPU activity and the foreground tmux command in the pod's
-`bot` session.
+`bot` session, then inspects the recent pane output so low-CPU agent CLIs that
+are waiting at a prompt are shown as idle.
 
 Dashboard writes are protected by a local operator token. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,

@@ -405,6 +405,8 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
+var idlePathLineRe = regexp.MustCompile(`^(~(/[A-Za-z0-9._-]+)*|/[A-Za-z0-9._~@%+=:,/-]+)$`)
+
 func validIdent(s string) bool {
 	if s == "" || len(s) > 64 {
 		return false
@@ -528,7 +530,7 @@ func detectActivity(container string, cpuPct float64) (string, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), activityProbeTimeout)
 	defer cancel()
 
-	script := `if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}"; else printf 'no-session\n'; fi`
+	script := `if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}"; printf '\n---POD_CAPTURE---\n'; tmux capture-pane -p -t bot:0.0 -S -30; else printf 'no-session\n'; fi`
 	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return "unknown", "activity probe timed out"
@@ -537,15 +539,65 @@ func detectActivity(container string, cpuPct float64) (string, string) {
 		return "unknown", strings.TrimSpace(stripANSI(string(out)))
 	}
 
-	command := strings.TrimSpace(string(out))
+	command, capture := splitActivityProbeOutput(string(out))
+	return classifyLowCPUActivity(command, capture)
+}
+
+func splitActivityProbeOutput(out string) (string, string) {
+	parts := strings.SplitN(out, "\n---POD_CAPTURE---\n", 2)
+	command := strings.TrimSpace(stripANSI(parts[0]))
+	if len(parts) == 1 {
+		return command, ""
+	}
+	return command, stripANSI(parts[1])
+}
+
+func classifyLowCPUActivity(command, capture string) (string, string) {
+	command = strings.TrimSpace(command)
 	switch command {
 	case "", "no-session":
 		return "idle", "no active agent tmux session"
 	case "bash", "sh", "ash", "zsh", "fish", "tmux":
 		return "idle", "agent pane is waiting at a shell"
 	default:
+		if captureLooksIdle(capture) {
+			return "idle", "agent pane is waiting for input: " + command
+		}
 		return "running", "foreground command: " + command
 	}
+}
+
+func captureLooksIdle(capture string) bool {
+	lines := recentNonEmptyLines(capture, 8)
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if idlePathLineRe.MatchString(line) {
+			return true
+		}
+		if strings.Contains(lower, "type a message") ||
+			strings.Contains(lower, "send a message") ||
+			strings.Contains(lower, "waiting for input") ||
+			strings.Contains(lower, "press enter to continue") {
+			return true
+		}
+		if strings.HasPrefix(line, ">") && len(line) <= 4 {
+			return true
+		}
+	}
+	return false
+}
+
+func recentNonEmptyLines(s string, max int) []string {
+	raw := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	lines := []string{}
+	for i := len(raw) - 1; i >= 0 && len(lines) < max; i-- {
+		line := strings.TrimSpace(raw[i])
+		line = strings.Trim(line, "│┃┆┊ ")
+		if line != "" {
+			lines = append([]string{line}, lines...)
+		}
+	}
+	return lines
 }
 
 func firstString(row map[string]any, keys ...string) string {

@@ -38,6 +38,27 @@ func TestFirstPercent(t *testing.T) {
 	}
 }
 
+func TestClassifyLowCPUAgentPromptAsIdle(t *testing.T) {
+	capture := `
+The square root of 20 is approximately 4.472.
+
+────────────────────────────────
+/workspace
+↑1.8k ↓65 1.4%/128k (auto) (rms) Qwen3.6-35B-A3B-8bit
+`
+	state, detail := classifyLowCPUActivity("pi", capture)
+	if state != "idle" {
+		t.Fatalf("got %q/%q, want idle", state, detail)
+	}
+}
+
+func TestClassifyLowCPUForegroundCommandAsRunning(t *testing.T) {
+	state, detail := classifyLowCPUActivity("pi", "thinking about the next tool call")
+	if state != "running" {
+		t.Fatalf("got %q/%q, want running", state, detail)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {
