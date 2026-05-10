@@ -149,13 +149,16 @@ body {
     flex: 1;
     margin: 0;
     overflow: auto;
-    padding: 1rem;
+    padding: .6rem .75rem;
     background: #000;
     color: #e5e7eb;
-    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    white-space: pre;
-    word-break: normal;
-    tab-size: 8;
+}
+.terminal-screen .xterm {
+    height: 100%;
+    padding: 0;
+}
+.terminal-screen .xterm-viewport {
+    background: #000 !important;
 }
 .terminal-empty {
     border-top: 1px solid rgba(148,163,184,.16);

@@ -262,7 +262,10 @@ are waiting at a prompt are shown as idle.
 The dashboard action bar includes a binoculars **View terminal** button. It
 opens a terminal overlay that follows the pod's `bot` tmux pane, can start the
 agent session when none exists, and can send input to the agent without SSHing
-into the host.
+into the host. The browser terminal uses vendored `@xterm/xterm`
+`6.1.0-beta.216` assets; exact `6.1.0` was not published on npm when this was
+added. Web-started sessions do not drop into a shell after the agent exits, and
+terminal input is rejected if the pane is only a shell.
 
 Dashboard writes are protected by a local operator token. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,

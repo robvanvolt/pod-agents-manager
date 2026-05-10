@@ -705,7 +705,7 @@ func startTerminalSession(agent, instance string) error {
 		"-e", "DEFAULT_MODEL="+os.Getenv("DEFAULT_MODEL"),
 		"-e", "POD_DEFAULT_MODEL="+os.Getenv("POD_DEFAULT_MODEL"),
 		container,
-		"bash", "-lc", `if tmux has-session -t bot 2>/dev/null; then exit 0; fi; tmux new-session -d -s bot 'bash -lc "${POD_AGENT} || true; exec bash"'`,
+		"bash", "-lc", `if tmux has-session -t bot 2>/dev/null; then cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") tmux kill-session -t bot 2>/dev/null || true ;; *) exit 0 ;; esac; fi; tmux new-session -d -s bot "$POD_AGENT"`,
 	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -725,8 +725,12 @@ func sendTerminalInput(agent, instance, input string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	args := []string{"exec", agent + "-" + instance, "tmux", "send-keys", "-t", "bot:0.0", "--", input, "Enter"}
-	cmd := exec.CommandContext(ctx, "podman", args...)
+	cmd := exec.CommandContext(ctx,
+		"podman", "exec",
+		"-e", "POD_TERMINAL_INPUT="+input,
+		agent+"-"+instance,
+		"bash", "-lc", `if ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi; cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac; tmux send-keys -t bot:0.0 -- "$POD_TERMINAL_INPUT" Enter`,
+	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("terminal input timed out")

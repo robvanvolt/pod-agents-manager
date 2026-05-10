@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pod Dashboard</title>
   <link rel="icon" href="./logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./vendor/xterm/xterm.css">
   <link rel="stylesheet" href="./dashboard.css">
 </head>
 <body>
@@ -54,7 +55,7 @@
         </div>
         <button type="button" aria-label="Close terminal" onclick="closeTerminal()">×</button>
       </div>
-      <pre id="terminal-output" class="terminal-screen">Loading terminal…</pre>
+      <div id="terminal-output" class="terminal-screen"></div>
       <div id="terminal-empty" class="terminal-empty" hidden>
         <p>No terminal output captured.</p>
         <button type="button" class="primary" onclick="startTerminalSession()">Start agent session</button>
@@ -99,9 +100,10 @@
   </div>
   </div>
 
+  <script src="./vendor/xterm/xterm.js"></script>
   <script>
     let authState = { role: 'viewer', authenticated: false };
-    let terminalState = { agent: '', instance: '', timer: null, followTail: true };
+    let terminalState = { agent: '', instance: '', timer: null, followTail: true, term: null, rendering: false };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -158,15 +160,6 @@
         <circle cx="17" cy="16" r="4"></circle>
         <path d="M11 16h2"></path>
       </svg>`;
-    const ansiColors = {
-      30: '#0f172a', 31: '#ef4444', 32: '#22c55e', 33: '#eab308', 34: '#3b82f6', 35: '#a855f7', 36: '#06b6d4', 37: '#e5e7eb',
-      90: '#64748b', 91: '#f87171', 92: '#4ade80', 93: '#facc15', 94: '#60a5fa', 95: '#c084fc', 96: '#22d3ee', 97: '#f8fafc'
-    };
-    const ansiBgColors = {
-      40: '#0f172a', 41: '#7f1d1d', 42: '#14532d', 43: '#713f12', 44: '#1e3a8a', 45: '#581c87', 46: '#164e63', 47: '#e5e7eb',
-      100: '#334155', 101: '#991b1b', 102: '#166534', 103: '#854d0e', 104: '#1d4ed8', 105: '#7e22ce', 106: '#0e7490', 107: '#f8fafc'
-    };
-
     function setChip(id, value) {
       const chip = document.getElementById(id);
       const val = document.getElementById(`${id}-val`);
@@ -333,11 +326,13 @@
       terminalState.instance = instance;
       document.getElementById('terminal-title').textContent = `${agent}-${instance}`;
       document.getElementById('terminal-meta').textContent = 'capturing bot tmux pane…';
-      document.getElementById('terminal-output').textContent = 'Loading terminal…';
       document.getElementById('terminal-empty').hidden = true;
       document.getElementById('terminal-input').value = '';
       terminalState.followTail = true;
       dialog.showModal();
+      initTerminal();
+      fitTerminal();
+      renderTerminalOutput('Loading terminal…');
       loadTerminal();
       clearInterval(terminalState.timer);
       terminalState.timer = setInterval(loadTerminal, 700);
@@ -352,17 +347,16 @@
 
     async function loadTerminal() {
       if (!terminalState.agent || !terminalState.instance) return;
-      const out = document.getElementById('terminal-output');
       const meta = document.getElementById('terminal-meta');
-      const previousScrollTop = out.scrollTop;
-      const shouldFollow = terminalState.followTail || isTerminalNearBottom(out);
+      const previousViewport = terminalState.term?.buffer.active.viewportY || 0;
+      const shouldFollow = terminalState.followTail || isTerminalNearBottom();
       try {
         const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
         const res = await fetch(`/api/terminal?${params.toString()}`);
         const text = await res.text();
         const empty = document.getElementById('terminal-empty');
         if (!res.ok) {
-          out.textContent = res.status === 401 ? 'Unlock operator mode first.' : text;
+          renderTerminalOutput(res.status === 401 ? 'Unlock operator mode first.' : text, true);
           meta.textContent = 'capture failed';
           if (empty) empty.hidden = true;
           return;
@@ -372,15 +366,9 @@
         meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
         const noSession = data.status === 'no-session';
         if (empty) empty.hidden = !noSession;
-        renderTerminalOutput(out, data.output || '');
-        if (shouldFollow) {
-          out.scrollTop = out.scrollHeight;
-          terminalState.followTail = true;
-        } else {
-          out.scrollTop = previousScrollTop;
-        }
+        renderTerminalOutput(data.output || '', shouldFollow, previousViewport);
       } catch (err) {
-        out.textContent = 'Network error: ' + err;
+        renderTerminalOutput('Network error: ' + err, true);
         meta.textContent = 'capture failed';
       }
     }
@@ -415,7 +403,10 @@
     }
 
     function isTerminalNearBottom(el) {
-      return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      const term = terminalState.term;
+      if (!term) return true;
+      const buffer = term.buffer.active;
+      return buffer.baseY - buffer.viewportY < 3;
     }
 
     function handleTerminalInputKey(ev) {
@@ -425,84 +416,55 @@
       }
     }
 
-    function renderTerminalOutput(el, raw) {
-      if (!raw) {
-        el.textContent = '';
-        return;
-      }
-      el.innerHTML = ansiToHtml(raw);
+    function initTerminal() {
+      if (terminalState.term) return;
+      const term = new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        fontSize: 12,
+        lineHeight: 1.15,
+        scrollback: 5000,
+        theme: { background: '#000000', foreground: '#e5e7eb', cursor: '#f8fafc' }
+      });
+      terminalState.term = term;
+      term.open(document.getElementById('terminal-output'));
+      term.onScroll(() => {
+        if (!terminalState.rendering) terminalState.followTail = isTerminalNearBottom();
+      });
+      window.addEventListener('resize', fitTerminal);
     }
 
-    function ansiToHtml(raw) {
-      let html = '';
-      let open = false;
-      const state = {};
-      const closeSpan = () => { if (open) { html += '</span>'; open = false; } };
-      const openSpan = () => {
-        const styles = [];
-        if (state.fg) styles.push(`color:${state.fg}`);
-        if (state.bg) styles.push(`background-color:${state.bg}`);
-        if (state.bold) styles.push('font-weight:700');
-        if (state.dim) styles.push('opacity:.72');
-        if (state.underline) styles.push('text-decoration:underline');
-        if (styles.length) { html += `<span style="${styles.join(';')}">`; open = true; }
-      };
-      const applyCodes = (codes) => {
-        closeSpan();
-        for (let i = 0; i < codes.length; i++) {
-          const code = codes[i];
-          if (code === 0) { state.fg = state.bg = ''; state.bold = state.dim = state.underline = false; }
-          else if (code === 1) state.bold = true;
-          else if (code === 2) state.dim = true;
-          else if (code === 4) state.underline = true;
-          else if (code === 22) state.bold = state.dim = false;
-          else if (code === 24) state.underline = false;
-          else if (code === 39) state.fg = '';
-          else if (code === 49) state.bg = '';
-          else if (ansiColors[code]) state.fg = ansiColors[code];
-          else if (ansiBgColors[code]) state.bg = ansiBgColors[code];
-          else if ((code === 38 || code === 48) && codes[i + 1] === 2 && codes.length >= i + 4) {
-            const color = `rgb(${codes[i + 2]},${codes[i + 3]},${codes[i + 4]})`;
-            if (code === 38) state.fg = color; else state.bg = color;
-            i += 4;
-          } else if ((code === 38 || code === 48) && codes[i + 1] === 5 && codes.length >= i + 2) {
-            const color = ansi256(codes[i + 2]);
-            if (code === 38) state.fg = color; else state.bg = color;
-            i += 2;
-          }
+    function fitTerminal() {
+      const term = terminalState.term;
+      const el = document.getElementById('terminal-output');
+      if (!term || !el || !el.clientWidth || !el.clientHeight) return;
+      const probe = document.createElement('span');
+      probe.textContent = 'W';
+      probe.style.cssText = 'position:absolute;visibility:hidden;font:12px/1.15 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;';
+      document.body.appendChild(probe);
+      const rect = probe.getBoundingClientRect();
+      probe.remove();
+      const cols = Math.max(40, Math.floor(el.clientWidth / Math.max(rect.width, 7)));
+      const rows = Math.max(8, Math.floor(el.clientHeight / Math.max(rect.height, 14)));
+      if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+    }
+
+    function renderTerminalOutput(raw, follow = terminalState.followTail, previousViewport = 0) {
+      initTerminal();
+      fitTerminal();
+      const term = terminalState.term;
+      terminalState.rendering = true;
+      term.reset();
+      term.write(raw || '', () => {
+        if (follow) {
+          term.scrollToBottom();
+          terminalState.followTail = true;
+        } else {
+          term.scrollToLine(Math.min(previousViewport, term.buffer.active.baseY));
         }
-        openSpan();
-      };
-      const re = /\x1b\[([0-9;]*)m/g;
-      let last = 0;
-      for (const match of raw.matchAll(re)) {
-        html += escapeHtml(raw.slice(last, match.index));
-        const codes = match[1] ? match[1].split(';').map(n => Number(n || 0)) : [0];
-        applyCodes(codes);
-        last = match.index + match[0].length;
-      }
-      html += escapeHtml(raw.slice(last));
-      closeSpan();
-      return html;
-    }
-
-    function ansi256(n) {
-      if (n < 16) {
-        const table = ['#000000','#800000','#008000','#808000','#000080','#800080','#008080','#c0c0c0','#808080','#ff0000','#00ff00','#ffff00','#0000ff','#ff00ff','#00ffff','#ffffff'];
-        return table[n] || '#e5e7eb';
-      }
-      if (n >= 16 && n <= 231) {
-        const v = n - 16;
-        const r = Math.floor(v / 36), g = Math.floor((v % 36) / 6), b = v % 6;
-        const c = x => x === 0 ? 0 : 55 + x * 40;
-        return `rgb(${c(r)},${c(g)},${c(b)})`;
-      }
-      const gray = 8 + (n - 232) * 10;
-      return `rgb(${gray},${gray},${gray})`;
-    }
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        terminalState.rendering = false;
+      });
     }
 
     async function sendAction(op, agent, instance) {
