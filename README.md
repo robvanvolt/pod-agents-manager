@@ -19,7 +19,7 @@
 
 Running half a dozen local coding agents in parallel — Claude Code in one window, OpenCode in another, a Crush instance churning through a refactor — usually means six terminals, six workspaces stomping each other, and no idea which one is actually doing work. `pod` turns any Linux box with rootless Podman into a multi-tenant home for those agents: each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
 
-Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, Nanocoder, and Little-Coder. A small Go-backed web dashboard exposes the same control surface over the LAN.
+Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, and Nanocoder. A small Go-backed web dashboard exposes the same control surface over the LAN.
 
 <div align="center">
   <img src="static/screenshots/dashboard.png" alt="Pod Agents Manager dashboard" width="720" />
@@ -445,5 +445,5 @@ Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).
 ## Acknowledgements
 
 - [Podman](https://podman.io/) and [Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html) — rootless, daemonless, systemd-native containers.
-- The agent CLIs themselves: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), [OpenCode](https://github.com/opencode-ai/opencode), [Crush](https://github.com/charmbracelet/crush), [Pi](https://github.com/mariozechner/pi-coding-agent), [Hermes](https://nousresearch.com/), [Nanocoder](https://github.com/Nano-Collective/nanocoder), [Little-Coder](https://github.com/itayinbarr/little-coder).
+- The agent CLIs themselves: [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), [OpenCode](https://github.com/opencode-ai/opencode), [Crush](https://github.com/charmbracelet/crush), [Pi](https://github.com/mariozechner/pi-coding-agent), [Hermes](https://nousresearch.com/), [Nanocoder](https://github.com/Nano-Collective/nanocoder).
 - Local-inference projects that made running these agents on your own hardware viable: [llama.cpp](https://github.com/ggerganov/llama.cpp), [vLLM](https://github.com/vllm-project/vllm), [LM Studio](https://lmstudio.ai/), [Ollama](https://ollama.com/).

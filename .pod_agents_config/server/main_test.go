@@ -15,18 +15,18 @@ func TestSplitManagedPodNamePrefersLongestAgent(t *testing.T) {
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"coder.sh", "little-coder.sh", "pi.sh"} {
+	for _, name := range []string{"coder.sh", "two-word.sh", "pi.sh"} {
 		if err := os.WriteFile(filepath.Join(agentsDir, name), []byte("# test\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	agent, instance, ok := splitManagedPodName(root, "little-coder-dev")
+	agent, instance, ok := splitManagedPodName(root, "two-word-dev")
 	if !ok {
 		t.Fatal("expected managed pod name")
 	}
-	if agent != "little-coder" || instance != "dev" {
-		t.Fatalf("got %q/%q, want little-coder/dev", agent, instance)
+	if agent != "two-word" || instance != "dev" {
+		t.Fatalf("got %q/%q, want two-word/dev", agent, instance)
 	}
 }
 
@@ -38,12 +38,12 @@ func TestFirstPercent(t *testing.T) {
 }
 
 func TestPodInstructionPath(t *testing.T) {
-	agent, instance, ok := parsePodInstructionPath("/api/pods/little-coder/dev/instructions")
+	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {
 		t.Fatal("expected path to parse")
 	}
-	if agent != "little-coder" || instance != "dev" {
-		t.Fatalf("got %q/%q, want little-coder/dev", agent, instance)
+	if agent != "two-word" || instance != "dev" {
+		t.Fatalf("got %q/%q, want two-word/dev", agent, instance)
 	}
 }
 
