@@ -1,5 +1,5 @@
     if [ "$#" -eq 0 ]; then
-        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "uninstall" "quit")
+        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "test" "uninstall" "quit")
         local selected_action=""
         
         while true; do

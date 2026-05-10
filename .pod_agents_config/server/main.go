@@ -288,6 +288,11 @@ func main() {
 		handleInstructForTarget(w, r, root, agent, instance, currentAuthContext(r, root))
 	})
 
+	mux.HandleFunc("/v1/models", shamModels)
+	mux.HandleFunc("/v1/chat/completions", shamChatCompletions)
+	mux.HandleFunc("/v1/completions", shamTextCompletions)
+	mux.HandleFunc("/v1/messages", shamAnthropicMessages)
+
 	port := os.Getenv("POD_SERVER_PORT")
 	if port == "" {
 		port = "1337"

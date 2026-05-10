@@ -31,6 +31,7 @@ Actions:
                ask <agent> <instance> "Question?" --option A --option B
   server       server {start|stop|restart|status|logs|build|token rotate}
   diagnostics  doctor
+  testing      test <agent> | test --all       (smoke-test agents via sham endpoint)
   uninstall    uninstall
 
 Examples:
@@ -50,6 +51,8 @@ Examples:
   ${_cmd} inbox pi dev
   ${_cmd} server start
   ${_cmd} server token rotate
+  ${_cmd} test --all
+  ${_cmd} test pi
   ${_cmd} uninstall
   ${_cmd} --version
 EOF

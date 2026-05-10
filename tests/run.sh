@@ -592,6 +592,42 @@ t_inbox_ask_queues_options() {
     return 0
 }
 
+t_test_no_args_prints_usage() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" test 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if [ "$rc" -eq 0 ]; then
+        echo "  expected nonzero exit; got 0" >&2
+        return 1
+    fi
+    if ! printf '%s' "$out" | grep -q "Usage:"; then
+        echo "  expected usage banner; got: $out" >&2
+        return 1
+    fi
+    return 0
+}
+
+t_test_all_errors_when_server_not_running() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    # Pin to an unused port so the curl probe deterministically fails in the
+    # sandbox, regardless of what's running on the dev host.
+    out=$(POD_SERVER_PORT=59999 run_pod_in_sandbox "$sandbox" test --all 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    if [ "$rc" -eq 0 ]; then
+        echo "  expected nonzero exit when sham endpoint missing; got 0" >&2
+        return 1
+    fi
+    if ! printf '%s' "$out" | grep -qiE "sham endpoint not reachable|server start"; then
+        echo "  expected sham-endpoint guidance; got: $out" >&2
+        return 1
+    fi
+    return 0
+}
+
 t_server_token_rotate_writes_auth() {
     local sandbox out auth_file
     sandbox=$(setup_sandbox)
@@ -664,6 +700,8 @@ run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options
+run_test "test: no args prints usage"          t_test_no_args_prints_usage
+run_test "test: --all errors w/o server"       t_test_all_errors_when_server_not_running
 run_test "server: token rotate writes auth"    t_server_token_rotate_writes_auth
 
 echo

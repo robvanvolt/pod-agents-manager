@@ -72,21 +72,23 @@
 
         _pod_server_build() {
             local force="${1:-0}"
-            if [ "$force" != "1" ] && [ -x "$server_bin" ] && [ "$server_bin" -nt "$server_dir/main.go" ]; then
+            local _newest_src
+            _newest_src=$(ls -t "$server_dir"/*.go 2>/dev/null | head -n 1)
+            if [ "$force" != "1" ] && [ -x "$server_bin" ] && [ -n "$_newest_src" ] && [ "$server_bin" -nt "$_newest_src" ]; then
                 return 0
             fi
             echo -e "\033[36mBuilding dashboard binary via $builder_image (host has no Go toolchain assumed)...\033[0m"
             # Build with a throwaway builder container; output the static binary to the host fs.
             # `podman unshare chown` is unnecessary because we mount the dir as the user namespace already maps it.
             if command -v go >/dev/null 2>&1; then
-                ( cd "$server_dir" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o server main.go ) || return 1
+                ( cd "$server_dir" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o server . ) || return 1
             else
                 podman run --rm \
                     -v "$server_dir":/src:Z \
                     -w /src \
                     -e CGO_ENABLED=0 \
                     "$builder_image" \
-                    sh -c 'go build -trimpath -ldflags="-s -w" -o server main.go' || return 1
+                    sh -c 'go build -trimpath -ldflags="-s -w" -o server .' || return 1
             fi
             chmod +x "$server_bin"
         }
