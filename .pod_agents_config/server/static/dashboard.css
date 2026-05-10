@@ -120,10 +120,15 @@ body {
 }
 
 .terminal-dialog {
-    width: min(96vw, 1040px);
-    height: min(86vh, 760px);
+    position: fixed;
+    inset: auto 1rem 1rem 1rem;
+    width: auto;
+    max-width: none;
+    height: min(72vh, 820px);
+    max-height: calc(100vh - 2rem);
+    margin: 0;
     border: 1px solid rgba(104,225,253,.32);
-    border-radius: .9rem;
+    border-radius: .9rem .9rem .35rem .35rem;
     padding: 0;
     background: #050914;
     color: var(--text);
@@ -281,7 +286,7 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     .topbar { flex-direction: column; align-items: flex-start; }
     .chips { justify-content: flex-start; }
     th, td { font-size: .74rem; }
-    .terminal-dialog { width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
+    .terminal-dialog { inset: 0; height: 100vh; max-height: 100vh; border-radius: 0; }
     .terminal-screen { font-size: 11px; }
     .terminal-input { flex-direction: column; }
 }

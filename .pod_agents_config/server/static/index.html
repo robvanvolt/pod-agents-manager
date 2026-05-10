@@ -101,7 +101,7 @@
 
   <script>
     let authState = { role: 'viewer', authenticated: false };
-    let terminalState = { agent: '', instance: '', timer: null };
+    let terminalState = { agent: '', instance: '', timer: null, followTail: true };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -336,6 +336,7 @@
       document.getElementById('terminal-output').textContent = 'Loading terminal…';
       document.getElementById('terminal-empty').hidden = true;
       document.getElementById('terminal-input').value = '';
+      terminalState.followTail = true;
       dialog.showModal();
       loadTerminal();
       clearInterval(terminalState.timer);
@@ -353,6 +354,8 @@
       if (!terminalState.agent || !terminalState.instance) return;
       const out = document.getElementById('terminal-output');
       const meta = document.getElementById('terminal-meta');
+      const previousScrollTop = out.scrollTop;
+      const shouldFollow = terminalState.followTail || isTerminalNearBottom(out);
       try {
         const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
         const res = await fetch(`/api/terminal?${params.toString()}`);
@@ -370,7 +373,12 @@
         const noSession = data.status === 'no-session';
         if (empty) empty.hidden = !noSession;
         renderTerminalOutput(out, data.output || '');
-        out.scrollTop = out.scrollHeight;
+        if (shouldFollow) {
+          out.scrollTop = out.scrollHeight;
+          terminalState.followTail = true;
+        } else {
+          out.scrollTop = previousScrollTop;
+        }
       } catch (err) {
         out.textContent = 'Network error: ' + err;
         meta.textContent = 'capture failed';
@@ -385,6 +393,7 @@
         return;
       }
       document.getElementById('terminal-empty').hidden = true;
+      terminalState.followTail = true;
       await loadTerminal();
     }
 
@@ -400,8 +409,13 @@
         return false;
       }
       input.value = '';
+      terminalState.followTail = true;
       await loadTerminal();
       return false;
+    }
+
+    function isTerminalNearBottom(el) {
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     }
 
     function handleTerminalInputKey(ev) {
@@ -604,6 +618,9 @@
     document.getElementById('terminal-dialog')?.addEventListener('close', () => {
       clearInterval(terminalState.timer);
       terminalState.timer = null;
+    });
+    document.getElementById('terminal-output')?.addEventListener('scroll', ev => {
+      terminalState.followTail = isTerminalNearBottom(ev.currentTarget);
     });
     setInterval(fetchStats, 3000);
     setInterval(fetchInfo, 30000);
