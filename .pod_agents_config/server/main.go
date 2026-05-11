@@ -826,6 +826,16 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 	}
 	defer ws.Close()
 
+	// Send a hello status frame immediately after the WS upgrade so the
+	// browser-side 2.5s "Terminal is still connecting…" fallback never
+	// fires while we run the (variable-latency) podman-exec calls below.
+	// captureTerminal + attachTerminalClient each shell out to podman,
+	// and on a busy host those can briefly take a couple of seconds —
+	// long enough to trigger the fallback even on a healthy session.
+	// This first frame clears the client's connectTimer the moment the
+	// socket opens; the snapshot/output frames follow at their own pace.
+	_ = ws.WriteJSON(terminalWSMessage{Type: "status", Data: "connected, capturing pane…"})
+
 	appendAudit(root, auditEntryFromRequest(r, "terminal.ws", agent+"-"+instance, "ok", "", auth.Role))
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
