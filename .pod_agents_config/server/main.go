@@ -817,6 +817,7 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 		http.Error(w, "invalid agent/instance", http.StatusBadRequest)
 		return
 	}
+	cols, rows := terminalSizeFromRequest(r)
 
 	ws, err := upgradeWebSocket(w, r)
 	if err != nil {
@@ -841,7 +842,7 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 	}
 
 	streamDone := make(chan error, 1)
-	terminal, err := attachTerminalClient(ctx, agent, instance)
+	terminal, err := attachTerminalClient(ctx, agent, instance, cols, rows)
 	if err != nil {
 		ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
 		return
@@ -898,9 +899,14 @@ func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance 
 	}
 }
 
-func attachTerminalClient(ctx context.Context, agent, instance string) (*terminalClient, error) {
+func attachTerminalClient(ctx context.Context, agent, instance string, cols, rows int) (*terminalClient, error) {
 	if err := ensureTerminalAgentActive(ctx, agent, instance); err != nil {
 		return nil, err
+	}
+	if cols > 0 && rows > 0 {
+		if err := resizeTerminalPane(agent, instance, cols, rows); err != nil {
+			return nil, err
+		}
 	}
 
 	cmd := exec.CommandContext(ctx,
@@ -908,8 +914,10 @@ func attachTerminalClient(ctx context.Context, agent, instance string) (*termina
 		"-i", "-t",
 		"-e", "TERM=xterm-256color",
 		"-e", "COLORTERM=truecolor",
+		"-e", "POD_TERMINAL_COLS="+strconv.Itoa(cols),
+		"-e", "POD_TERMINAL_ROWS="+strconv.Itoa(rows),
 		agent+"-"+instance,
-		"tmux", "attach-session", "-t", "bot",
+		"sh", "-lc", `printf 'POD_TERMINAL_CLIENT=%s\n' "$(tty)" >&2; if [ "$POD_TERMINAL_COLS" -gt 0 ] 2>/dev/null && [ "$POD_TERMINAL_ROWS" -gt 0 ] 2>/dev/null; then stty cols "$POD_TERMINAL_COLS" rows "$POD_TERMINAL_ROWS" 2>/dev/null || true; fi; exec tmux attach-session -t bot`,
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -927,14 +935,28 @@ func attachTerminalClient(ctx context.Context, agent, instance string) (*termina
 		return nil, err
 	}
 
+	stderrReader := bufio.NewReader(stderr)
+	clientName := ""
+	clientReady := make(chan string, 1)
+	go func() {
+		line, _ := stderrReader.ReadString('\n')
+		clientReady <- strings.TrimPrefix(strings.TrimSpace(line), "POD_TERMINAL_CLIENT=")
+	}()
+	select {
+	case clientName = <-clientReady:
+	case <-time.After(700 * time.Millisecond):
+	}
+
 	client := &terminalClient{
-		cmd:    cmd,
-		stdin:  stdin,
-		stdout: stdout,
+		cmd:        cmd,
+		stdin:      stdin,
+		stdout:     stdout,
+		container:  agent + "-" + instance,
+		clientName: clientName,
 	}
 	client.errDone = make(chan []byte, 1)
 	go func() {
-		b, _ := io.ReadAll(io.LimitReader(stderr, 4096))
+		b, _ := io.ReadAll(io.LimitReader(stderrReader, 4096))
 		client.errDone <- b
 	}()
 	return client, nil
@@ -983,8 +1005,18 @@ func (c *terminalClient) WriteString(data string) error {
 
 func (c *terminalClient) Close() {
 	_ = c.stdin.Close()
+	c.Detach()
 	c.Kill()
 	_ = c.Wait()
+}
+
+func (c *terminalClient) Detach() {
+	if c.container == "" || c.clientName == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "podman", "exec", c.container, "tmux", "detach-client", "-t", c.clientName).Run()
 }
 
 func (c *terminalClient) Kill() {
@@ -1189,6 +1221,15 @@ func resizeTerminalPane(agent, instance string, cols, rows int) error {
 		return fmt.Errorf("%s", terminalCommandError(out, err))
 	}
 	return nil
+}
+
+func terminalSizeFromRequest(r *http.Request) (int, int) {
+	cols, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("cols")))
+	rows, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("rows")))
+	if cols < 20 || cols > 300 || rows < 5 || rows > 120 {
+		return 0, 0
+	}
+	return cols, rows
 }
 
 func terminalCommandError(out []byte, err error) string {
@@ -1498,13 +1539,15 @@ type webSocketConn struct {
 }
 
 type terminalClient struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.Reader
-	errDone  chan []byte
-	mu       sync.Mutex
-	waitOnce sync.Once
-	waitErr  error
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     io.Reader
+	errDone    chan []byte
+	container  string
+	clientName string
+	mu         sync.Mutex
+	waitOnce   sync.Once
+	waitErr    error
 }
 
 type authState struct {

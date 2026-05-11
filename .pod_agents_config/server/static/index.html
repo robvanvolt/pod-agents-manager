@@ -329,8 +329,11 @@
       initTerminal();
       fitTerminal();
       renderTerminalOutput('Loading terminal…');
-      connectTerminalSocket();
-      terminalState.term?.focus();
+      requestAnimationFrame(() => {
+        fitTerminal();
+        connectTerminalSocket();
+        terminalState.term?.focus();
+      });
     }
 
     function closeTerminal() {
@@ -350,7 +353,12 @@
         return;
       }
       meta.textContent = 'connecting terminal…';
+      const size = fitTerminal();
       const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+      if (size) {
+        params.set('cols', String(size.cols));
+        params.set('rows', String(size.rows));
+      }
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocket(`${proto}//${window.location.host}/api/terminal/ws?${params.toString()}`);
       terminalState.socket = socket;
@@ -458,7 +466,7 @@
     function fitTerminal() {
       const term = terminalState.term;
       const el = document.getElementById('terminal-output');
-      if (!term || !el || !el.clientWidth || !el.clientHeight) return;
+      if (!term || !el || !el.clientWidth || !el.clientHeight) return null;
       const probe = document.createElement('span');
       probe.textContent = 'W';
       probe.style.cssText = 'position:absolute;visibility:hidden;font:12px/1.15 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;';
@@ -471,6 +479,7 @@
         term.resize(cols, rows);
         sendTerminalResize();
       }
+      return { cols, rows };
     }
 
     function renderTerminalOutput(raw, follow = terminalState.followTail, previousViewport = 0) {

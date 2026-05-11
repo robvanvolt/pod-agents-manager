@@ -98,6 +98,20 @@ func TestWebSocketAcceptKey(t *testing.T) {
 	}
 }
 
+func TestTerminalSizeFromRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/terminal/ws?cols=120&rows=36", nil)
+	cols, rows := terminalSizeFromRequest(req)
+	if cols != 120 || rows != 36 {
+		t.Fatalf("got %dx%d, want 120x36", cols, rows)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/terminal/ws?cols=999&rows=36", nil)
+	cols, rows = terminalSizeFromRequest(req)
+	if cols != 0 || rows != 0 {
+		t.Fatalf("got %dx%d, want invalid size to be ignored", cols, rows)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {
