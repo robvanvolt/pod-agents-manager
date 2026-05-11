@@ -99,7 +99,7 @@
   <script src="./vendor/xterm/xterm.js"></script>
   <script>
     let authState = { role: 'viewer', authenticated: false };
-    let terminalState = { agent: '', instance: '', socket: null, followTail: true, term: null, rendering: false };
+    let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, term: null, rendering: false };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -343,17 +343,30 @@
       if (!terminalState.agent || !terminalState.instance) return;
       closeTerminalSocket();
       const meta = document.getElementById('terminal-meta');
+      if (authState.role !== 'operator') {
+        renderTerminalOutput('Unlock operator mode first.', true);
+        meta.textContent = 'terminal locked';
+        return;
+      }
       meta.textContent = 'connecting terminal…';
       const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const socket = new WebSocket(`${proto}//${window.location.host}/api/terminal/ws?${params.toString()}`);
       terminalState.socket = socket;
+      socket._gotMessage = false;
+      terminalState.connectTimer = setTimeout(() => {
+        if (terminalState.socket !== socket || socket._gotMessage) return;
+        renderTerminalOutput('Terminal is still connecting…', true);
+        meta.textContent = 'waiting for terminal stream';
+      }, 2500);
 
       socket.addEventListener('open', () => {
         meta.textContent = 'terminal connected';
         sendTerminalResize();
       });
       socket.addEventListener('message', (ev) => {
+        socket._gotMessage = true;
+        clearTerminalConnectTimer();
         let msg;
         try { msg = JSON.parse(ev.data); } catch (_) { return; }
         if (msg.type === 'snapshot' && msg.snapshot) {
@@ -367,14 +380,22 @@
           meta.textContent = 'terminal error';
         }
       });
-      socket.addEventListener('close', () => {
+      socket.addEventListener('close', (ev) => {
+        clearTerminalConnectTimer();
         if (terminalState.socket === socket) {
           terminalState.socket = null;
           meta.textContent = 'terminal disconnected';
+          if (!socket._gotMessage) {
+            const reason = authState.role !== 'operator'
+              ? 'Unlock operator mode first.'
+              : `Terminal connection closed before output.${ev.code ? ' Code: ' + ev.code + '.' : ''}`;
+            renderTerminalOutput(reason, true);
+          }
         }
       });
       socket.addEventListener('error', () => {
-        renderTerminalOutput('Terminal connection failed.', true);
+        clearTerminalConnectTimer();
+        if (!socket._gotMessage) renderTerminalOutput('Terminal connection failed.', true);
         meta.textContent = 'terminal failed';
       });
     }
@@ -492,10 +513,16 @@
     }
 
     function closeTerminalSocket() {
+      clearTerminalConnectTimer();
       if (!terminalState.socket) return;
       const socket = terminalState.socket;
       terminalState.socket = null;
       try { socket.close(); } catch (_) {}
+    }
+
+    function clearTerminalConnectTimer() {
+      clearTimeout(terminalState.connectTimer);
+      terminalState.connectTimer = null;
     }
 
     async function sendAction(op, agent, instance) {
