@@ -841,13 +841,19 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 	}
 
 	streamDone := make(chan error, 1)
+	terminal, err := attachTerminalClient(ctx, agent, instance)
+	if err != nil {
+		ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+		return
+	}
+	defer terminal.Close()
 	go func() {
-		streamDone <- streamTerminalPane(ctx, ws, agent, instance)
+		streamDone <- terminal.Stream(ws)
 	}()
 
 	readDone := make(chan error, 1)
 	go func() {
-		readDone <- readTerminalSocket(ctx, ws, agent, instance)
+		readDone <- readTerminalSocket(ctx, ws, agent, instance, terminal)
 	}()
 
 	select {
@@ -865,7 +871,7 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 	}
 }
 
-func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance string) error {
+func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance string, terminal *terminalClient) error {
 	for {
 		payload, err := ws.ReadText()
 		if err != nil {
@@ -878,7 +884,7 @@ func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance 
 		}
 		switch msg.Type {
 		case "input":
-			if err := sendTerminalData(agent, instance, msg.Data); err != nil {
+			if err := terminal.WriteString(msg.Data); err != nil {
 				ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
 			}
 		case "resize":
@@ -892,59 +898,66 @@ func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance 
 	}
 }
 
-func streamTerminalPane(ctx context.Context, ws *webSocketConn, agent, instance string) error {
+func attachTerminalClient(ctx context.Context, agent, instance string) (*terminalClient, error) {
 	if err := ensureTerminalAgentActive(ctx, agent, instance); err != nil {
-		return err
+		return nil, err
 	}
 
-	script := `if ! command -v tmux >/dev/null 2>&1 || ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi
-cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true)
-case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac
-fifo=$(mktemp -u /tmp/pod-terminal.XXXXXX)
-mkfifo "$fifo"
-cleanup() { tmux pipe-pane -t bot:0.0 2>/dev/null || true; rm -f "$fifo"; }
-trap cleanup EXIT INT TERM
-tmux pipe-pane -o -t bot:0.0 "cat >> $fifo"
-cat "$fifo"`
-	cmd := exec.CommandContext(ctx, "podman", "exec", agent+"-"+instance, "sh", "-lc", script)
+	cmd := exec.CommandContext(ctx,
+		"podman", "exec",
+		"-i", "-t",
+		"-e", "TERM=xterm-256color",
+		"-e", "COLORTERM=truecolor",
+		agent+"-"+instance,
+		"tmux", "attach-session", "-t", "bot",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return nil, err
 	}
 
-	errDone := make(chan []byte, 1)
+	client := &terminalClient{
+		cmd:    cmd,
+		stdin:  stdin,
+		stdout: stdout,
+	}
+	client.errDone = make(chan []byte, 1)
 	go func() {
 		b, _ := io.ReadAll(io.LimitReader(stderr, 4096))
-		errDone <- b
+		client.errDone <- b
 	}()
+	return client, nil
+}
 
+func (c *terminalClient) Stream(ws *webSocketConn) error {
 	buf := make([]byte, 4096)
 	for {
-		n, readErr := stdout.Read(buf)
+		n, readErr := c.stdout.Read(buf)
 		if n > 0 {
 			if err := ws.WriteJSON(terminalWSMessage{Type: "output", Data: string(buf[:n])}); err != nil {
-				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
+				c.Kill()
+				_ = c.Wait()
 				return err
 			}
 		}
 		if readErr != nil {
-			waitErr := cmd.Wait()
-			if ctx.Err() != nil {
-				return nil
-			}
+			waitErr := c.Wait()
 			if readErr != io.EOF {
 				return readErr
 			}
 			if waitErr != nil {
-				msg := strings.TrimSpace(stripANSI(string(<-errDone)))
+				msg := strings.TrimSpace(stripANSI(string(<-c.errDone)))
 				if msg == "" {
 					msg = waitErr.Error()
 				}
@@ -953,6 +966,38 @@ cat "$fifo"`
 			return nil
 		}
 	}
+}
+
+func (c *terminalClient) WriteString(data string) error {
+	if data == "" {
+		return nil
+	}
+	if len(data) > 4096 {
+		return fmt.Errorf("terminal input is too large")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, err := io.WriteString(c.stdin, data)
+	return err
+}
+
+func (c *terminalClient) Close() {
+	_ = c.stdin.Close()
+	c.Kill()
+	_ = c.Wait()
+}
+
+func (c *terminalClient) Kill() {
+	if c.cmd != nil && c.cmd.Process != nil {
+		_ = c.cmd.Process.Kill()
+	}
+}
+
+func (c *terminalClient) Wait() error {
+	c.waitOnce.Do(func() {
+		c.waitErr = c.cmd.Wait()
+	})
+	return c.waitErr
 }
 
 func captureTerminal(container string, lines int) (terminalSnapshot, error) {
@@ -1015,7 +1060,7 @@ func startTerminalSession(agent, instance string) error {
 		"-e", "DEFAULT_MODEL="+os.Getenv("DEFAULT_MODEL"),
 		"-e", "POD_DEFAULT_MODEL="+os.Getenv("POD_DEFAULT_MODEL"),
 		container,
-		"bash", "-lc", `if tmux has-session -t bot 2>/dev/null; then cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") tmux kill-session -t bot 2>/dev/null || true ;; *) exit 0 ;; esac; fi; tmux new-session -d -s bot "$POD_AGENT"`,
+		"bash", "-lc", `if tmux has-session -t bot 2>/dev/null; then exit 0; fi; tmux new-session -d -s bot "$POD_AGENT"`,
 	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -1076,7 +1121,7 @@ func ensureTerminalAgentActive(ctx context.Context, agent, instance string) erro
 	cmd := exec.CommandContext(ctx,
 		"podman", "exec",
 		agent+"-"+instance,
-		"bash", "-lc", `if ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi; cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac`,
+		"bash", "-lc", `if ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi`,
 	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -1131,8 +1176,10 @@ func resizeTerminalPane(agent, instance string, cols, rows int) error {
 
 	cmd := exec.CommandContext(ctx,
 		"podman", "exec",
+		"-e", "POD_TERMINAL_COLS="+strconv.Itoa(cols),
+		"-e", "POD_TERMINAL_ROWS="+strconv.Itoa(rows),
 		agent+"-"+instance,
-		"tmux", "resize-pane", "-t", "bot:0.0", "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows),
+		"sh", "-lc", `tmux resize-window -t bot -x "$POD_TERMINAL_COLS" -y "$POD_TERMINAL_ROWS" 2>/dev/null || tmux resize-pane -t bot:0.0 -x "$POD_TERMINAL_COLS" -y "$POD_TERMINAL_ROWS"`,
 	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
@@ -1448,6 +1495,16 @@ type webSocketConn struct {
 	conn net.Conn
 	br   *bufio.Reader
 	mu   sync.Mutex
+}
+
+type terminalClient struct {
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdout   io.Reader
+	errDone  chan []byte
+	mu       sync.Mutex
+	waitOnce sync.Once
+	waitErr  error
 }
 
 type authState struct {

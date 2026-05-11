@@ -264,12 +264,12 @@ The dashboard action bar includes a binoculars **View terminal** button. It
 opens a terminal overlay that follows the pod's `bot` tmux pane, can start the
 agent session when none exists, and can send input to the agent without SSHing
 into the host. The overlay uses a WebSocket-backed xterm surface: it sends an
-initial tmux capture, streams new pane output, forwards xterm keystrokes, and
-resizes the tmux pane with the browser terminal. The browser terminal uses
-vendored `@xterm/xterm` `6.1.0-beta.216` assets; exact `6.1.0` was not
-published on npm when this was added. Web-started sessions do not drop into a
-shell after the agent exits, and terminal input is rejected if the pane is only
-a shell.
+initial tmux capture, attaches a real tmux client inside the pod, forwards raw
+xterm input bytes, and resizes the tmux window with the browser terminal. That
+keeps tmux UI details like the status line and prefix shortcuts available while
+still keeping the browser terminal inside the selected pod. The browser terminal
+uses vendored `@xterm/xterm` `6.1.0-beta.216` assets; exact `6.1.0` was not
+published on npm when this was added.
 
 Dashboard writes are protected by a local operator token. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,
