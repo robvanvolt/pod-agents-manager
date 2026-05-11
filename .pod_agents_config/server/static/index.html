@@ -339,12 +339,13 @@
       if (dialog?.open) dialog.close();
     }
 
-    function connectTerminalSocket() {
+    async function connectTerminalSocket() {
       if (!terminalState.agent || !terminalState.instance) return;
       closeTerminalSocket();
       const meta = document.getElementById('terminal-meta');
+      await fetchAuthStatus();
       if (authState.role !== 'operator') {
-        renderTerminalOutput('Unlock operator mode first.', true);
+        renderTerminalOutput('Unlock operator mode first.\r\n\r\nThe terminal WebSocket requires an active operator session.', true);
         meta.textContent = 'terminal locked';
         return;
       }
@@ -388,7 +389,7 @@
           if (!socket._gotMessage) {
             const reason = authState.role !== 'operator'
               ? 'Unlock operator mode first.'
-              : `Terminal connection closed before output.${ev.code ? ' Code: ' + ev.code + '.' : ''}`;
+              : `Terminal connection closed before output.${ev.code ? '\r\nCode: ' + ev.code + '.' : ''}`;
             renderTerminalOutput(reason, true);
           }
         }
@@ -401,6 +402,12 @@
     }
 
     async function startTerminalSession() {
+      await fetchAuthStatus();
+      if (authState.role !== 'operator') {
+        renderTerminalOutput('Unlock operator mode first.\r\n\r\nStarting a terminal session requires operator mode.', true);
+        document.getElementById('terminal-meta').textContent = 'terminal locked';
+        return;
+      }
       const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
       const res = await fetch('/api/terminal/start', { method: 'POST', body });
       if (!res.ok) {
