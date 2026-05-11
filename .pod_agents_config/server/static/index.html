@@ -60,10 +60,6 @@
         <p>No terminal output captured.</p>
         <button type="button" class="primary" onclick="startTerminalSession()">Start agent session</button>
       </div>
-      <form class="terminal-input" onsubmit="return sendTerminalLine(event)">
-        <textarea id="terminal-input" rows="2" placeholder="Send input to the agent…" onkeydown="handleTerminalInputKey(event)"></textarea>
-        <button type="submit" class="primary">Send</button>
-      </form>
     </div>
   </dialog>
 
@@ -103,7 +99,7 @@
   <script src="./vendor/xterm/xterm.js"></script>
   <script>
     let authState = { role: 'viewer', authenticated: false };
-    let terminalState = { agent: '', instance: '', timer: null, followTail: true, term: null, rendering: false };
+    let terminalState = { agent: '', instance: '', socket: null, followTail: true, term: null, rendering: false };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -322,55 +318,65 @@
     function openTerminal(agent, instance) {
       const dialog = document.getElementById('terminal-dialog');
       if (!dialog) return;
+      closeTerminalSocket();
       terminalState.agent = agent;
       terminalState.instance = instance;
       document.getElementById('terminal-title').textContent = `${agent}-${instance}`;
-      document.getElementById('terminal-meta').textContent = 'capturing bot tmux pane…';
+      document.getElementById('terminal-meta').textContent = 'connecting terminal…';
       document.getElementById('terminal-empty').hidden = true;
-      document.getElementById('terminal-input').value = '';
       terminalState.followTail = true;
       dialog.showModal();
       initTerminal();
       fitTerminal();
       renderTerminalOutput('Loading terminal…');
-      loadTerminal();
-      clearInterval(terminalState.timer);
-      terminalState.timer = setInterval(loadTerminal, 700);
+      connectTerminalSocket();
+      terminalState.term?.focus();
     }
 
     function closeTerminal() {
-      clearInterval(terminalState.timer);
-      terminalState.timer = null;
+      closeTerminalSocket();
       const dialog = document.getElementById('terminal-dialog');
       if (dialog?.open) dialog.close();
     }
 
-    async function loadTerminal() {
+    function connectTerminalSocket() {
       if (!terminalState.agent || !terminalState.instance) return;
+      closeTerminalSocket();
       const meta = document.getElementById('terminal-meta');
-      const previousViewport = terminalState.term?.buffer.active.viewportY || 0;
-      const shouldFollow = terminalState.followTail || isTerminalNearBottom();
-      try {
-        const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
-        const res = await fetch(`/api/terminal?${params.toString()}`);
-        const text = await res.text();
-        const empty = document.getElementById('terminal-empty');
-        if (!res.ok) {
-          renderTerminalOutput(res.status === 401 ? 'Unlock operator mode first.' : text, true);
-          meta.textContent = 'capture failed';
-          if (empty) empty.hidden = true;
-          return;
+      meta.textContent = 'connecting terminal…';
+      const params = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance });
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const socket = new WebSocket(`${proto}//${window.location.host}/api/terminal/ws?${params.toString()}`);
+      terminalState.socket = socket;
+
+      socket.addEventListener('open', () => {
+        meta.textContent = 'terminal connected';
+        sendTerminalResize();
+      });
+      socket.addEventListener('message', (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch (_) { return; }
+        if (msg.type === 'snapshot' && msg.snapshot) {
+          handleTerminalSnapshot(msg.snapshot);
+        } else if (msg.type === 'output') {
+          writeTerminalChunk(msg.data || '');
+        } else if (msg.type === 'status') {
+          meta.textContent = msg.data || 'terminal status';
+        } else if (msg.type === 'error') {
+          showToast(msg.error || 'terminal error', true);
+          meta.textContent = 'terminal error';
         }
-        const data = JSON.parse(text);
-        const size = data.rows && data.cols ? ` · ${data.cols}×${data.rows}` : '';
-        meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
-        const noSession = data.status === 'no-session';
-        if (empty) empty.hidden = !noSession;
-        renderTerminalOutput(data.output || '', shouldFollow, previousViewport);
-      } catch (err) {
-        renderTerminalOutput('Network error: ' + err, true);
-        meta.textContent = 'capture failed';
-      }
+      });
+      socket.addEventListener('close', () => {
+        if (terminalState.socket === socket) {
+          terminalState.socket = null;
+          meta.textContent = 'terminal disconnected';
+        }
+      });
+      socket.addEventListener('error', () => {
+        renderTerminalOutput('Terminal connection failed.', true);
+        meta.textContent = 'terminal failed';
+      });
     }
 
     async function startTerminalSession() {
@@ -382,24 +388,7 @@
       }
       document.getElementById('terminal-empty').hidden = true;
       terminalState.followTail = true;
-      await loadTerminal();
-    }
-
-    async function sendTerminalLine(ev) {
-      ev.preventDefault();
-      const input = document.getElementById('terminal-input');
-      const value = input.value.trim();
-      if (!value) return false;
-      const body = new URLSearchParams({ agent: terminalState.agent, instance: terminalState.instance, input: value });
-      const res = await fetch('/api/terminal/input', { method: 'POST', body });
-      if (!res.ok) {
-        showToast(await res.text(), true);
-        return false;
-      }
-      input.value = '';
-      terminalState.followTail = true;
-      await loadTerminal();
-      return false;
+      connectTerminalSocket();
     }
 
     function isTerminalNearBottom(el) {
@@ -409,16 +398,14 @@
       return buffer.baseY - buffer.viewportY < 3;
     }
 
-    function handleTerminalInputKey(ev) {
-      if (ev.key === 'Enter' && !ev.shiftKey) {
-        ev.preventDefault();
-        sendTerminalLine(ev);
-      }
-    }
-
     function initTerminal() {
       if (terminalState.term) return;
-      const term = new Terminal({
+      const TerminalCtor = window.Terminal;
+      if (!TerminalCtor) {
+        showToast('xterm failed to load', true);
+        return;
+      }
+      const term = new TerminalCtor({
         cursorBlink: true,
         convertEol: true,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -431,6 +418,11 @@
       term.open(document.getElementById('terminal-output'));
       term.onScroll(() => {
         if (!terminalState.rendering) terminalState.followTail = isTerminalNearBottom();
+      });
+      term.onData((data) => {
+        const socket = terminalState.socket;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(JSON.stringify({ type: 'input', data }));
       });
       window.addEventListener('resize', fitTerminal);
     }
@@ -447,13 +439,17 @@
       probe.remove();
       const cols = Math.max(40, Math.floor(el.clientWidth / Math.max(rect.width, 7)));
       const rows = Math.max(8, Math.floor(el.clientHeight / Math.max(rect.height, 14)));
-      if (term.cols !== cols || term.rows !== rows) term.resize(cols, rows);
+      if (term.cols !== cols || term.rows !== rows) {
+        term.resize(cols, rows);
+        sendTerminalResize();
+      }
     }
 
     function renderTerminalOutput(raw, follow = terminalState.followTail, previousViewport = 0) {
       initTerminal();
       fitTerminal();
       const term = terminalState.term;
+      if (!term) return;
       terminalState.rendering = true;
       term.reset();
       term.write(raw || '', () => {
@@ -465,6 +461,41 @@
         }
         terminalState.rendering = false;
       });
+    }
+
+    function handleTerminalSnapshot(data) {
+      const meta = document.getElementById('terminal-meta');
+      const empty = document.getElementById('terminal-empty');
+      const size = data.rows && data.cols ? ` · ${data.cols}×${data.rows}` : '';
+      meta.textContent = `${data.command || 'no-session'} · ${new Date(data.captured_at).toLocaleTimeString()}${size}`;
+      const noSession = data.status === 'no-session';
+      if (empty) empty.hidden = !noSession;
+      renderTerminalOutput(data.output || '', true);
+    }
+
+    function writeTerminalChunk(raw) {
+      initTerminal();
+      fitTerminal();
+      const term = terminalState.term;
+      if (!term) return;
+      const follow = terminalState.followTail || isTerminalNearBottom();
+      term.write(raw || '', () => {
+        if (follow) term.scrollToBottom();
+      });
+    }
+
+    function sendTerminalResize() {
+      const socket = terminalState.socket;
+      const term = terminalState.term;
+      if (!socket || socket.readyState !== WebSocket.OPEN || !term) return;
+      socket.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+    }
+
+    function closeTerminalSocket() {
+      if (!terminalState.socket) return;
+      const socket = terminalState.socket;
+      terminalState.socket = null;
+      try { socket.close(); } catch (_) {}
     }
 
     async function sendAction(op, agent, instance) {
@@ -578,8 +609,7 @@
     fetchStats();
     loadAgentOptions();
     document.getElementById('terminal-dialog')?.addEventListener('close', () => {
-      clearInterval(terminalState.timer);
-      terminalState.timer = null;
+      closeTerminalSocket();
     });
     document.getElementById('terminal-output')?.addEventListener('scroll', ev => {
       terminalState.followTail = isTerminalNearBottom(ev.currentTarget);

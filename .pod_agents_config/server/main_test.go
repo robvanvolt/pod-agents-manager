@@ -80,6 +80,24 @@ func TestNormalizeTerminalInput(t *testing.T) {
 	}
 }
 
+func TestTerminalKeyEvents(t *testing.T) {
+	events := terminalKeyEvents("hi\x7f\r\x1b[A")
+	if len(events) != 4 {
+		t.Fatalf("got %d events: %#v", len(events), events)
+	}
+	if events[0].Literal != "hi" || events[1].Key != "BSpace" || events[2].Key != "Enter" || events[3].Key != "Up" {
+		t.Fatalf("unexpected events: %#v", events)
+	}
+}
+
+func TestWebSocketAcceptKey(t *testing.T) {
+	got := webSocketAcceptKey("dGhlIHNhbXBsZSBub25jZQ==")
+	want := "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {

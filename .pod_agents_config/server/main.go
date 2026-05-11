@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -296,6 +299,10 @@ func main() {
 		json.NewEncoder(w).Encode(snapshot)
 	})
 
+	mux.HandleFunc("/api/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
+		handleTerminalWebSocket(w, r, root)
+	})
+
 	mux.HandleFunc("/api/terminal/start", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -440,6 +447,146 @@ func noCache(next http.Handler) http.Handler {
 		w.Header().Set("Expires", "0")
 		next.ServeHTTP(w, r)
 	})
+}
+
+func upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*webSocketConn, error) {
+	if !headerHasToken(r.Header, "Connection", "upgrade") || !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return nil, fmt.Errorf("websocket upgrade required")
+	}
+	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
+	if key == "" {
+		return nil, fmt.Errorf("missing websocket key")
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return nil, fmt.Errorf("websocket hijack unsupported")
+	}
+	conn, rw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+	accept := webSocketAcceptKey(key)
+	fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\n")
+	fmt.Fprintf(rw, "Upgrade: websocket\r\n")
+	fmt.Fprintf(rw, "Connection: Upgrade\r\n")
+	fmt.Fprintf(rw, "Sec-WebSocket-Accept: %s\r\n\r\n", accept)
+	if err := rw.Flush(); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &webSocketConn{conn: conn, br: rw.Reader}, nil
+}
+
+func headerHasToken(h http.Header, name, token string) bool {
+	for _, value := range h.Values(name) {
+		for _, part := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func webSocketAcceptKey(key string) string {
+	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func (ws *webSocketConn) Close() error {
+	return ws.conn.Close()
+}
+
+func (ws *webSocketConn) WriteJSON(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return ws.WriteFrame(1, b)
+}
+
+func (ws *webSocketConn) WriteFrame(opcode byte, payload []byte) error {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+
+	header := []byte{0x80 | opcode}
+	switch {
+	case len(payload) < 126:
+		header = append(header, byte(len(payload)))
+	case len(payload) <= 0xffff:
+		header = append(header, 126, byte(len(payload)>>8), byte(len(payload)))
+	default:
+		header = append(header, 127)
+		var ext [8]byte
+		binary.BigEndian.PutUint64(ext[:], uint64(len(payload)))
+		header = append(header, ext[:]...)
+	}
+	if _, err := ws.conn.Write(header); err != nil {
+		return err
+	}
+	_, err := ws.conn.Write(payload)
+	return err
+}
+
+func (ws *webSocketConn) ReadText() ([]byte, error) {
+	for {
+		opcode, payload, err := ws.ReadFrame()
+		if err != nil {
+			return nil, err
+		}
+		switch opcode {
+		case 1:
+			return payload, nil
+		case 8:
+			ws.WriteFrame(8, nil)
+			return nil, io.EOF
+		case 9:
+			ws.WriteFrame(10, payload)
+		}
+	}
+}
+
+func (ws *webSocketConn) ReadFrame() (byte, []byte, error) {
+	var head [2]byte
+	if _, err := io.ReadFull(ws.br, head[:]); err != nil {
+		return 0, nil, err
+	}
+	opcode := head[0] & 0x0f
+	masked := head[1]&0x80 != 0
+	length := uint64(head[1] & 0x7f)
+	switch length {
+	case 126:
+		var ext [2]byte
+		if _, err := io.ReadFull(ws.br, ext[:]); err != nil {
+			return 0, nil, err
+		}
+		length = uint64(binary.BigEndian.Uint16(ext[:]))
+	case 127:
+		var ext [8]byte
+		if _, err := io.ReadFull(ws.br, ext[:]); err != nil {
+			return 0, nil, err
+		}
+		length = binary.BigEndian.Uint64(ext[:])
+	}
+	if length > 64*1024 {
+		return 0, nil, fmt.Errorf("websocket frame too large")
+	}
+	var mask [4]byte
+	if masked {
+		if _, err := io.ReadFull(ws.br, mask[:]); err != nil {
+			return 0, nil, err
+		}
+	}
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(ws.br, payload); err != nil {
+		return 0, nil, err
+	}
+	if masked {
+		for i := range payload {
+			payload[i] ^= mask[i%4]
+		}
+	}
+	return opcode, payload, nil
 }
 
 func readDefaultBase(root string) string {
@@ -654,6 +801,160 @@ func classifyLowCPUActivity(command, capture string) (string, string) {
 	}
 }
 
+func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	auth := currentAuthContext(r, root)
+	if auth.Role != "operator" {
+		http.Error(w, "operator role required", http.StatusUnauthorized)
+		return
+	}
+	agent := strings.TrimSpace(r.URL.Query().Get("agent"))
+	instance := strings.TrimSpace(r.URL.Query().Get("instance"))
+	if !validIdent(agent) || !validIdent(instance) {
+		http.Error(w, "invalid agent/instance", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := upgradeWebSocket(w, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer ws.Close()
+
+	appendAudit(root, auditEntryFromRequest(r, "terminal.ws", agent+"-"+instance, "ok", "", auth.Role))
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	snapshot, err := captureTerminal(agent+"-"+instance, 180)
+	if err != nil {
+		ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+		return
+	}
+	ws.WriteJSON(terminalWSMessage{Type: "snapshot", Snapshot: &snapshot})
+	if snapshot.Status == "no-session" {
+		ws.WriteJSON(terminalWSMessage{Type: "status", Data: "no active agent session"})
+		return
+	}
+
+	streamDone := make(chan error, 1)
+	go func() {
+		streamDone <- streamTerminalPane(ctx, ws, agent, instance)
+	}()
+
+	readDone := make(chan error, 1)
+	go func() {
+		readDone <- readTerminalSocket(ctx, ws, agent, instance)
+	}()
+
+	select {
+	case err := <-readDone:
+		cancel()
+		if err != nil && err != io.EOF {
+			ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+		}
+	case err := <-streamDone:
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+		}
+	case <-ctx.Done():
+	}
+}
+
+func readTerminalSocket(ctx context.Context, ws *webSocketConn, agent, instance string) error {
+	for {
+		payload, err := ws.ReadText()
+		if err != nil {
+			return err
+		}
+		var msg terminalWSMessage
+		if err := json.Unmarshal(payload, &msg); err != nil {
+			ws.WriteJSON(terminalWSMessage{Type: "error", Error: "invalid terminal message"})
+			continue
+		}
+		switch msg.Type {
+		case "input":
+			if err := sendTerminalData(agent, instance, msg.Data); err != nil {
+				ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+			}
+		case "resize":
+			if err := resizeTerminalPane(agent, instance, msg.Cols, msg.Rows); err != nil {
+				ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+}
+
+func streamTerminalPane(ctx context.Context, ws *webSocketConn, agent, instance string) error {
+	if err := ensureTerminalAgentActive(ctx, agent, instance); err != nil {
+		return err
+	}
+
+	script := `if ! command -v tmux >/dev/null 2>&1 || ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi
+cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true)
+case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac
+fifo=$(mktemp -u /tmp/pod-terminal.XXXXXX)
+mkfifo "$fifo"
+cleanup() { tmux pipe-pane -t bot:0.0 2>/dev/null || true; rm -f "$fifo"; }
+trap cleanup EXIT INT TERM
+tmux pipe-pane -o -t bot:0.0 "cat >> $fifo"
+cat "$fifo"`
+	cmd := exec.CommandContext(ctx, "podman", "exec", agent+"-"+instance, "sh", "-lc", script)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	errDone := make(chan []byte, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(stderr, 4096))
+		errDone <- b
+	}()
+
+	buf := make([]byte, 4096)
+	for {
+		n, readErr := stdout.Read(buf)
+		if n > 0 {
+			if err := ws.WriteJSON(terminalWSMessage{Type: "output", Data: string(buf[:n])}); err != nil {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+				return err
+			}
+		}
+		if readErr != nil {
+			waitErr := cmd.Wait()
+			if ctx.Err() != nil {
+				return nil
+			}
+			if readErr != io.EOF {
+				return readErr
+			}
+			if waitErr != nil {
+				msg := strings.TrimSpace(stripANSI(string(<-errDone)))
+				if msg == "" {
+					msg = waitErr.Error()
+				}
+				return fmt.Errorf("%s", msg)
+			}
+			return nil
+		}
+	}
+}
+
 func captureTerminal(container string, lines int) (terminalSnapshot, error) {
 	snapshot := terminalSnapshot{
 		Status:     "ok",
@@ -734,24 +1035,121 @@ func sendTerminalInput(agent, instance, input string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	if err := ensureTerminalAgentActive(ctx, agent, instance); err != nil {
+		return err
+	}
+	if err := sendTmuxLiteral(ctx, agent+"-"+instance, input); err != nil {
+		return err
+	}
+	return sendTmuxKey(ctx, agent+"-"+instance, "Enter")
+}
+
+func sendTerminalData(agent, instance, data string) error {
+	if data == "" {
+		return nil
+	}
+	if len(data) > 4096 {
+		return fmt.Errorf("terminal input is too large")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := ensureTerminalAgentActive(ctx, agent, instance); err != nil {
+		return err
+	}
+	container := agent + "-" + instance
+	for _, event := range terminalKeyEvents(data) {
+		var err error
+		if event.Literal != "" {
+			err = sendTmuxLiteral(ctx, container, event.Literal)
+		} else {
+			err = sendTmuxKey(ctx, container, event.Key)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureTerminalAgentActive(ctx context.Context, agent, instance string) error {
 	cmd := exec.CommandContext(ctx,
 		"podman", "exec",
-		"-e", "POD_TERMINAL_INPUT="+input,
 		agent+"-"+instance,
-		"bash", "-lc", `if ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi; cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac; tmux send-keys -t bot:0.0 -- "$POD_TERMINAL_INPUT" Enter`,
+		"bash", "-lc", `if ! tmux has-session -t bot 2>/dev/null; then echo "agent session is not running"; exit 3; fi; cmd=$(tmux display-message -p -t bot:0.0 "#{pane_current_command}" 2>/dev/null || true); case "$cmd" in bash|sh|ash|zsh|fish|tmux|"") echo "agent session is not active; start the agent session first"; exit 4 ;; esac`,
 	)
 	out, err := cmd.CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
 		return fmt.Errorf("terminal input timed out")
 	}
+	if err == nil {
+		return nil
+	}
+	msg := strings.TrimSpace(stripANSI(string(out)))
+	if msg == "" {
+		msg = err.Error()
+	}
+	return fmt.Errorf("%s", msg)
+}
+
+func sendTmuxLiteral(ctx context.Context, container, literal string) error {
+	if literal == "" {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "podman", "exec", container, "tmux", "send-keys", "-t", "bot:0.0", "-l", "--", literal)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("terminal input timed out")
+	}
 	if err != nil {
-		msg := strings.TrimSpace(stripANSI(string(out)))
-		if msg == "" {
-			msg = err.Error()
-		}
-		return fmt.Errorf("%s", msg)
+		return fmt.Errorf("%s", terminalCommandError(out, err))
 	}
 	return nil
+}
+
+func sendTmuxKey(ctx context.Context, container, key string) error {
+	if key == "" {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "podman", "exec", container, "tmux", "send-keys", "-t", "bot:0.0", key)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("terminal input timed out")
+	}
+	if err != nil {
+		return fmt.Errorf("%s", terminalCommandError(out, err))
+	}
+	return nil
+}
+
+func resizeTerminalPane(agent, instance string, cols, rows int) error {
+	if cols < 20 || cols > 300 || rows < 5 || rows > 120 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx,
+		"podman", "exec",
+		agent+"-"+instance,
+		"tmux", "resize-pane", "-t", "bot:0.0", "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows),
+	)
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("terminal resize timed out")
+	}
+	if err != nil {
+		return fmt.Errorf("%s", terminalCommandError(out, err))
+	}
+	return nil
+}
+
+func terminalCommandError(out []byte, err error) string {
+	msg := strings.TrimSpace(stripANSI(string(out)))
+	if msg == "" {
+		msg = err.Error()
+	}
+	return msg
 }
 
 func readTerminalTarget(r *http.Request) (string, string, error) {
@@ -806,6 +1204,73 @@ func normalizeTerminalInput(input string) string {
 		input = input[:8000]
 	}
 	return input
+}
+
+func terminalKeyEvents(data string) []terminalKeyEvent {
+	var events []terminalKeyEvent
+	var literal strings.Builder
+	flushLiteral := func() {
+		if literal.Len() == 0 {
+			return
+		}
+		events = append(events, terminalKeyEvent{Literal: literal.String()})
+		literal.Reset()
+	}
+	for i := 0; i < len(data); {
+		switch {
+		case strings.HasPrefix(data[i:], "\x1b[A"):
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Up"})
+			i += 3
+		case strings.HasPrefix(data[i:], "\x1b[B"):
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Down"})
+			i += 3
+		case strings.HasPrefix(data[i:], "\x1b[C"):
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Right"})
+			i += 3
+		case strings.HasPrefix(data[i:], "\x1b[D"):
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Left"})
+			i += 3
+		case strings.HasPrefix(data[i:], "\x1b[3~"):
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Delete"})
+			i += 4
+		case data[i] == '\r' || data[i] == '\n':
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Enter"})
+			i++
+		case data[i] == '\t':
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Tab"})
+			i++
+		case data[i] == 0x7f || data[i] == '\b':
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "BSpace"})
+			i++
+		case data[i] == 0x03:
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "C-c"})
+			i++
+		case data[i] == 0x04:
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "C-d"})
+			i++
+		case data[i] == 0x1b:
+			flushLiteral()
+			events = append(events, terminalKeyEvent{Key: "Escape"})
+			i++
+		case data[i] < 0x20:
+			i++
+		default:
+			literal.WriteByte(data[i])
+			i++
+		}
+	}
+	flushLiteral()
+	return events
 }
 
 func splitTerminalProbeOutput(out string) (string, string) {
@@ -963,6 +1428,26 @@ type terminalSnapshot struct {
 	Cols       string `json:"cols,omitempty"`
 	Output     string `json:"output"`
 	CapturedAt string `json:"captured_at"`
+}
+
+type terminalKeyEvent struct {
+	Literal string
+	Key     string
+}
+
+type terminalWSMessage struct {
+	Type     string            `json:"type"`
+	Data     string            `json:"data,omitempty"`
+	Snapshot *terminalSnapshot `json:"snapshot,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	Cols     int               `json:"cols,omitempty"`
+	Rows     int               `json:"rows,omitempty"`
+}
+
+type webSocketConn struct {
+	conn net.Conn
+	br   *bufio.Reader
+	mu   sync.Mutex
 }
 
 type authState struct {

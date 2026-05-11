@@ -245,6 +245,7 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `POST /api/auth/logout` | End the operator session |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
 | `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
+| `GET /api/terminal/ws` | Operator-only WebSocket stream for live xterm terminal output and input |
 | `POST /api/terminal/start` | Start the pod's detached `bot` tmux agent session |
 | `POST /api/terminal/input` | Send input to the pod's `bot` tmux pane |
 | `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
@@ -262,10 +263,13 @@ are waiting at a prompt are shown as idle.
 The dashboard action bar includes a binoculars **View terminal** button. It
 opens a terminal overlay that follows the pod's `bot` tmux pane, can start the
 agent session when none exists, and can send input to the agent without SSHing
-into the host. The browser terminal uses vendored `@xterm/xterm`
-`6.1.0-beta.216` assets; exact `6.1.0` was not published on npm when this was
-added. Web-started sessions do not drop into a shell after the agent exits, and
-terminal input is rejected if the pane is only a shell.
+into the host. The overlay uses a WebSocket-backed xterm surface: it sends an
+initial tmux capture, streams new pane output, forwards xterm keystrokes, and
+resizes the tmux pane with the browser terminal. The browser terminal uses
+vendored `@xterm/xterm` `6.1.0-beta.216` assets; exact `6.1.0` was not
+published on npm when this was added. Web-started sessions do not drop into a
+shell after the agent exits, and terminal input is rejected if the pane is only
+a shell.
 
 Dashboard writes are protected by a local operator token. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,
