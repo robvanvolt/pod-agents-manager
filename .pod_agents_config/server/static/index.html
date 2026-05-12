@@ -49,7 +49,7 @@
   <dialog id="terminal-dialog" class="terminal-dialog">
     <div class="terminal-panel">
       <div class="terminal-head">
-        <div>
+        <div class="terminal-title-row">
           <h2 id="terminal-title">Terminal</h2>
           <p id="terminal-meta">waiting for capture</p>
         </div>
@@ -461,6 +461,12 @@
         socket.send(JSON.stringify({ type: 'input', data }));
       });
       window.addEventListener('resize', fitTerminal);
+      if (window.ResizeObserver) {
+        const observer = new ResizeObserver(() => {
+          requestAnimationFrame(fitTerminal);
+        });
+        observer.observe(document.getElementById('terminal-output'));
+      }
     }
 
     function fitTerminal() {
@@ -478,6 +484,7 @@
       if (term.cols !== cols || term.rows !== rows) {
         term.resize(cols, rows);
         sendTerminalResize();
+        requestAnimationFrame(() => term.scrollToBottom());
       }
       return { cols, rows };
     }
