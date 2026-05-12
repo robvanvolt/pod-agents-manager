@@ -399,6 +399,20 @@
               ? 'Unlock operator mode first.'
               : `Terminal connection closed before output.${ev.code ? '\r\nCode: ' + ev.code + '.' : ''}`;
             renderTerminalOutput(reason, true);
+          } else {
+            // Session ended cleanly after we'd received output (Ctrl+D in
+            // the fallback shell, `exit`, tmux session ending, etc.).
+            // Auto-dismiss the dialog so it feels like a real terminal
+            // emulator. Brief delay lets the user see the "disconnected"
+            // status; the dialog also closes on Escape if they prefer.
+            const dialog = document.getElementById('terminal-dialog');
+            if (dialog?.open) {
+              setTimeout(() => {
+                if (terminalState.socket === null && dialog.open) {
+                  try { dialog.close(); } catch (_) {}
+                }
+              }, 600);
+            }
           }
         }
       });

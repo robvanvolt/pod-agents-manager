@@ -139,13 +139,29 @@ EOF
             echo "" >> "$build_dir/Containerfile"
         fi
 
-        # TrueColor tmux config without "set -g extended-keys-format csi-u"
+        # TrueColor tmux config without "set -g extended-keys-format csi-u".
+        # The explicit status-* options make tmux's bottom bar visible and
+        # informative inside the LAN dashboard's xterm.js view (the default
+        # green-on-black bar is easy to miss with the dashboard's dark theme).
         cat <<'EOF' > "$build_dir/tmux.conf"
 set -g default-terminal "tmux-256color"
 set -ag terminal-overrides ",xterm-256color:RGB"
 set -g extended-keys on
 set -g extended-keys-format csi-u
 set -g focus-events on
+
+# Status bar — keep it visible, distinctive, and useful when panes are split.
+set -g status on
+set -g status-position bottom
+set -g status-interval 5
+set -g status-justify left
+set -g status-left-length 40
+set -g status-right-length 60
+set -g status-style "bg=#1f2937,fg=#e5e7eb"
+set -g status-left " #[bold]#S #[default]· #W "
+set -g status-right "#{?pane_in_mode,[copy] ,}#{pane_current_command} · %H:%M "
+set -g window-status-current-style "bold,fg=#fbbf24"
+set -g pane-border-status off
 EOF
         echo "COPY tmux.conf /etc/tmux.conf" >> "$build_dir/Containerfile"
     }

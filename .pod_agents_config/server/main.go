@@ -45,12 +45,27 @@ const (
 if [ "$POD_TERMINAL_COLS" -gt 0 ] 2>/dev/null && [ "$POD_TERMINAL_ROWS" -gt 0 ] 2>/dev/null; then
 	stty cols "$POD_TERMINAL_COLS" rows "$POD_TERMINAL_ROWS" 2>/dev/null || true
 fi
+# Apply the dashboard's tmux status-bar style live, so existing pods get
+# the new bar without needing a full image rebuild. The same options are
+# baked into /etc/tmux.conf for fresh builds.
+tmux set-option -g status on 2>/dev/null
+tmux set-option -g status-position bottom 2>/dev/null
+tmux set-option -g status-style 'bg=#1f2937,fg=#e5e7eb' 2>/dev/null
+tmux set-option -g status-left ' #[bold]#S #[default]· #W ' 2>/dev/null
+tmux set-option -g status-right '#{pane_current_command} · %H:%M ' 2>/dev/null
+tmux set-option -g window-status-current-style 'bold,fg=#fbbf24' 2>/dev/null
 cd /workspace 2>/dev/null || cd "$HOME" 2>/dev/null || true
 tmux attach-session -t bot
 status=$?
 if [ "$status" -eq 0 ]; then
 	printf '\r\n[detached from bot - pod shell in %s]\r\n' "$(pwd)"
-	exec "${SHELL:-/bin/sh}" -i
+	# Use bash explicitly when available — readline gives us reliable
+	# Ctrl+D-at-empty-prompt → exit behavior. Fall back to sh otherwise.
+	if command -v bash >/dev/null 2>&1; then
+		exec bash -i
+	else
+		exec sh -i
+	fi
 fi
 exit "$status"
 `
