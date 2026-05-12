@@ -1,6 +1,12 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -328,4 +334,83 @@ func TestSessionCookieSecureFlagUsesTLSOrEnv(t *testing.T) {
 	if !rec.Result().Cookies()[0].Secure {
 		t.Fatal("expected forced secure cookie")
 	}
+}
+
+func TestParseRegistrationAuthDataES256(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cose := testCOSEES256(privateKey)
+	rpHash := sha256.Sum256([]byte("127.0.0.1"))
+	authData := append([]byte{}, rpHash[:]...)
+	authData = append(authData, 0x41)
+	authData = binary.BigEndian.AppendUint32(authData, 7)
+	authData = append(authData, make([]byte, 16)...)
+	authData = binary.BigEndian.AppendUint16(authData, 4)
+	authData = append(authData, []byte("cred")...)
+	authData = append(authData, cose...)
+
+	parsed, err := parseRegistrationAuthData(authData, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Alg != -7 || parsed.SignCount != 7 || string(parsed.CredentialID) != "cred" {
+		t.Fatalf("unexpected parsed auth data: %#v", parsed)
+	}
+}
+
+func TestVerifyAuthenticationDataES256(t *testing.T) {
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpHash := sha256.Sum256([]byte("127.0.0.1"))
+	authData := append([]byte{}, rpHash[:]...)
+	authData = append(authData, 0x01)
+	authData = binary.BigEndian.AppendUint32(authData, 8)
+	clientDataJSON := []byte(`{"type":"webauthn.get","challenge":"abc","origin":"http://127.0.0.1"}`)
+	clientHash := sha256.Sum256(clientDataJSON)
+	signedData := append([]byte{}, authData...)
+	signedData = append(signedData, clientHash[:]...)
+	digest := sha256.Sum256(signedData)
+	signature, err := ecdsa.SignASN1(rand.Reader, privateKey, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key := passkeyCredential{
+		PublicKey: base64.RawURLEncoding.EncodeToString(testCOSEES256(privateKey)),
+	}
+	signCount, err := verifyAuthenticationData(authData, clientDataJSON, signature, key, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if signCount != 8 {
+		t.Fatalf("got sign count %d, want 8", signCount)
+	}
+}
+
+func TestVerifyPasskeyChallengeRejectsOrigin(t *testing.T) {
+	err := verifyPasskeyChallenge(passkeyChallenge{
+		Challenge: "abc",
+		ExpiresAt: time.Now().Add(time.Minute).Format(time.RFC3339),
+	}, webAuthnClientData{
+		Type:      "webauthn.get",
+		Challenge: "abc",
+		Origin:    "http://evil.example",
+	}, "webauthn.get", "http://127.0.0.1")
+	if err == nil || !strings.Contains(err.Error(), "origin mismatch") {
+		t.Fatalf("got err %v, want origin mismatch", err)
+	}
+}
+
+func testCOSEES256(privateKey *ecdsa.PrivateKey) []byte {
+	x := privateKey.PublicKey.X.FillBytes(make([]byte, 32))
+	y := privateKey.PublicKey.Y.FillBytes(make([]byte, 32))
+	out := []byte{0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20}
+	out = append(out, x...)
+	out = append(out, 0x22, 0x58, 0x20)
+	out = append(out, y...)
+	return out
 }

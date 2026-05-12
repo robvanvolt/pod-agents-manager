@@ -24,6 +24,7 @@
         <span class="chip" id="chip-ip" hidden><span class="label">ip</span><code id="chip-ip-val">–</code></span>
         <span class="chip" id="chip-auth"><span class="label">role</span><code id="chip-auth-val">viewer</code></span>
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
+        <button type="button" id="passkey-register-button" onclick="registerPasskey()" hidden>Register Passkey</button>
         <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
   </div>
@@ -41,6 +42,7 @@
       </div>
       <p id="auth-error" class="auth-error" aria-live="polite"></p>
       <div class="auth-actions">
+        <button type="button" id="auth-passkey-button" onclick="loginWithPasskey()" hidden>Use Passkey</button>
         <button type="button" onclick="closeAuthDialog()">Cancel</button>
         <button type="submit" class="primary">Unlock</button>
       </div>
@@ -96,6 +98,7 @@
   </div>
   </div>
 
+  <script src="./vendor/simplewebauthn/browser.js"></script>
   <script src="./vendor/xterm/xterm.js"></script>
   <script>
     let authState = { role: 'viewer', authenticated: false };
@@ -190,6 +193,18 @@
       const btn = document.getElementById('auth-button');
       if (btn) btn.textContent = authState.authenticated ? 'Lock' : 'Unlock';
       const canWrite = authState.role === 'operator';
+      const passkeyReady = passkeysUsable();
+      const passkeyCount = Number(authState.passkeys?.registered || 0);
+      const registerBtn = document.getElementById('passkey-register-button');
+      if (registerBtn) {
+        registerBtn.hidden = !canWrite || !passkeyReady;
+        registerBtn.title = passkeyReady ? 'Register this browser or device as an operator passkey' : 'Passkeys require HTTPS, localhost, and WebAuthn support';
+      }
+      const passkeyLoginBtn = document.getElementById('auth-passkey-button');
+      if (passkeyLoginBtn) {
+        passkeyLoginBtn.hidden = authState.authenticated || passkeyCount < 1 || !passkeyReady;
+        passkeyLoginBtn.title = passkeyReady ? 'Unlock operator mode with a registered passkey' : 'Passkeys require HTTPS, localhost, and WebAuthn support';
+      }
       const submit = document.getElementById('f-submit');
       if (submit) {
         submit.disabled = !canWrite;
@@ -253,6 +268,60 @@
       await fetchAuthStatus();
       fetchStats();
       return false;
+    }
+
+    function passkeysUsable() {
+      const api = window.SimpleWebAuthnBrowser;
+      return Boolean(window.isSecureContext && api?.browserSupportsWebAuthn?.());
+    }
+
+    async function passkeyRequest(path, body = null) {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let data = {};
+      if (text) {
+        try { data = JSON.parse(text); } catch (_) { data = { error: text }; }
+      }
+      if (!res.ok) throw new Error(data.error || text || res.statusText);
+      return data;
+    }
+
+    async function registerPasskey() {
+      const err = document.getElementById('auth-error');
+      try {
+        if (!passkeysUsable()) throw new Error('Passkeys require HTTPS or localhost in a WebAuthn-capable browser.');
+        const optionsJSON = await passkeyRequest('/api/auth/passkey/register/options');
+        const credential = await window.SimpleWebAuthnBrowser.startRegistration({ optionsJSON });
+        await passkeyRequest('/api/auth/passkey/register/verify', credential);
+        showToast('Passkey registered');
+        if (err) err.textContent = '';
+        await fetchAuthStatus();
+      } catch (error) {
+        const msg = error?.message || 'Passkey registration failed';
+        if (err) err.textContent = msg;
+        showToast(msg, true);
+      }
+    }
+
+    async function loginWithPasskey() {
+      const err = document.getElementById('auth-error');
+      try {
+        if (!passkeysUsable()) throw new Error('Passkeys require HTTPS or localhost in a WebAuthn-capable browser.');
+        if (err) err.textContent = '';
+        const optionsJSON = await passkeyRequest('/api/auth/passkey/login/options');
+        const credential = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON });
+        await passkeyRequest('/api/auth/passkey/login/verify', credential);
+        closeAuthDialog();
+        showToast('Operator mode unlocked with passkey');
+        await fetchAuthStatus();
+        fetchStats();
+      } catch (error) {
+        if (err) err.textContent = error?.message || 'Passkey rejected.';
+      }
     }
 
     function updateClock() {

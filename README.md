@@ -243,6 +243,10 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /api/auth/status` | Current dashboard role and passkey readiness |
 | `POST /api/auth/login` | Unlock operator mode with the local bootstrap token |
 | `POST /api/auth/logout` | End the operator session |
+| `POST /api/auth/passkey/register/options` | Operator-only WebAuthn registration options |
+| `POST /api/auth/passkey/register/verify` | Operator-only WebAuthn registration verification |
+| `POST /api/auth/passkey/login/options` | WebAuthn login options for registered passkeys |
+| `POST /api/auth/passkey/login/verify` | Verify a passkey assertion and create an operator session |
 | `GET /api/agents` | Available agents, flavors, volumes, bases |
 | `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
 | `GET /api/terminal/ws` | Operator-only WebSocket stream for live xterm terminal output and input |
@@ -271,22 +275,25 @@ still keeping the browser terminal inside the selected pod. The browser terminal
 uses vendored `@xterm/xterm` `6.1.0-beta.216` assets; exact `6.1.0` was not
 published on npm when this was added.
 
-Dashboard writes are protected by a local operator token. Viewers can load the
+Dashboard writes are protected by local operator auth. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,
-stopping, restarting, and queuing instructions requires unlocking operator mode.
+stopping, restarting, queuing instructions, opening the live terminal, and
+registering passkeys require unlocking operator mode.
 
 ```bash
 pod server token rotate   # prints a one-time operator token
 pod server restart
 ```
 
-Operator sessions are stored as HttpOnly cookies, token hashes and sessions live
-in `~/.pod_agents_config/server/auth.json`, and write attempts are appended to
-`~/.pod_agents_config/server/audit.jsonl`. `GET /api/auth/status` advertises the
-planned SimpleWebAuthn package pair (`@simplewebauthn/browser` and
-`@simplewebauthn/server`) so passkeys can plug into the same role/session model.
-Dashboard writes also reject cross-origin POSTs and `/api/auth/login` is
-rate-limited per client IP before token verification.
+Operator sessions are stored as HttpOnly cookies, token hashes, passkey
+credential public keys, challenges, and sessions live in
+`~/.pod_agents_config/server/auth.json`, and write attempts are appended to
+`~/.pod_agents_config/server/audit.jsonl`. The dashboard vendors
+`@simplewebauthn/browser` `13.3.0` for browser ceremonies and verifies ES256
+WebAuthn registrations/assertions in the native Go server so the dashboard
+remains a single host binary without an external identity provider. Dashboard
+writes also reject cross-origin POSTs and token/passkey login attempts are
+rate-limited per client IP before verification.
 
 **First-time auth setup.** The dashboard starts in viewer mode: stats and pod
 lists are visible, but write actions are locked. To unlock operator mode:
@@ -296,8 +303,19 @@ pod server token rotate    # prints a one-time bootstrap token
 ```
 
 Click **Unlock** in the dashboard and paste the token. The session lasts 24
-hours per browser. Lost the token? Run `pod server token rotate` again; active
-sessions stay valid until they expire.
+hours per browser. Once unlocked, click **Register Passkey** to add a local
+device passkey for future logins. Passkeys require a browser WebAuthn secure
+context, so use HTTPS or localhost. For a remote sandbox or LAN host, a quick
+setup path is:
+
+```bash
+ssh -L 1337:127.0.0.1:1337 nuc
+# then open http://localhost:1337
+```
+
+Lost the token? Run `pod server token
+rotate` again; active sessions and registered passkeys stay valid until you
+remove or rotate the auth file yourself.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 
@@ -369,14 +387,15 @@ benchmark suite (0.7) → public 1.0.
 
 ### 0.5 — auth and safe LAN sharing
 
-- Add passkey-native dashboard login with SimpleWebAuthn:
-  - `@simplewebauthn/browser` in the dashboard/PWA
-  - `@simplewebauthn/server` for registration and authentication verification
+- Ship passkey-native dashboard login:
+  - `@simplewebauthn/browser` `13.3.0` in the dashboard/PWA
+  - native Go WebAuthn-compatible verification for ES256 registration and authentication assertions
   - local credential storage under `~/.pod_agents_config/server/`
   - no external identity provider required
 - Keep `pod server token rotate` as a recovery/bootstrap path for headless hosts and first-time passkey setup.
 - Add read-only and operator roles so a viewer link can be shared without granting `delete`/`create`.
-- Add an audit log for every `POST /api/action` and `POST /api/create` call: who, when, which pod, what changed.
+- Add an audit log for every mutating dashboard action: who, when, which pod, what changed.
+- Next hardening pass: passkey deletion/renaming UI, HTTPS helper docs, optional `@simplewebauthn/server` compatibility notes if the dashboard ever gains a Node sidecar.
 
 ### 0.6 — polish and demoability
 

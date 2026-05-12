@@ -114,6 +114,7 @@ body {
 }
 .auth-error { min-height: 1.1rem; margin: .55rem 0 0; color: #fecaca; font-size: .78rem; }
 .auth-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .85rem; }
+#auth-passkey-button { margin-right: auto; }
 .auth-actions .primary {
     background: linear-gradient(135deg, var(--brand), var(--brand-2));
     color: #04111b; border-color: rgba(104,225,253,.5);
