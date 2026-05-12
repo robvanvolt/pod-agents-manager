@@ -41,6 +41,19 @@ var (
 const (
 	loginRateWindow      = time.Minute
 	loginRateMaxAttempts = 10
+	terminalAttachScript = `
+if [ "$POD_TERMINAL_COLS" -gt 0 ] 2>/dev/null && [ "$POD_TERMINAL_ROWS" -gt 0 ] 2>/dev/null; then
+	stty cols "$POD_TERMINAL_COLS" rows "$POD_TERMINAL_ROWS" 2>/dev/null || true
+fi
+cd /workspace 2>/dev/null || cd "$HOME" 2>/dev/null || true
+tmux attach-session -t bot
+status=$?
+if [ "$status" -eq 0 ]; then
+	printf '\r\n[detached from bot - pod shell in %s]\r\n' "$(pwd)"
+	exec "${SHELL:-/bin/sh}" -i
+fi
+exit "$status"
+`
 )
 
 func main() {
@@ -927,7 +940,7 @@ func attachTerminalClient(ctx context.Context, agent, instance string, cols, row
 		"-e", "POD_TERMINAL_COLS="+strconv.Itoa(cols),
 		"-e", "POD_TERMINAL_ROWS="+strconv.Itoa(rows),
 		agent+"-"+instance,
-		"sh", "-lc", `printf 'POD_TERMINAL_CLIENT=%s\n' "$(tty)" >&2; if [ "$POD_TERMINAL_COLS" -gt 0 ] 2>/dev/null && [ "$POD_TERMINAL_ROWS" -gt 0 ] 2>/dev/null; then stty cols "$POD_TERMINAL_COLS" rows "$POD_TERMINAL_ROWS" 2>/dev/null || true; fi; exec tmux attach-session -t bot`,
+		"sh", "-lc", terminalAttachScript,
 	)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -945,28 +958,14 @@ func attachTerminalClient(ctx context.Context, agent, instance string, cols, row
 		return nil, err
 	}
 
-	stderrReader := bufio.NewReader(stderr)
-	clientName := ""
-	clientReady := make(chan string, 1)
-	go func() {
-		line, _ := stderrReader.ReadString('\n')
-		clientReady <- strings.TrimPrefix(strings.TrimSpace(line), "POD_TERMINAL_CLIENT=")
-	}()
-	select {
-	case clientName = <-clientReady:
-	case <-time.After(700 * time.Millisecond):
-	}
-
 	client := &terminalClient{
-		cmd:        cmd,
-		stdin:      stdin,
-		stdout:     stdout,
-		container:  agent + "-" + instance,
-		clientName: clientName,
+		cmd:    cmd,
+		stdin:  stdin,
+		stdout: stdout,
 	}
 	client.errDone = make(chan []byte, 1)
 	go func() {
-		b, _ := io.ReadAll(io.LimitReader(stderrReader, 4096))
+		b, _ := io.ReadAll(io.LimitReader(stderr, 4096))
 		client.errDone <- b
 	}()
 	return client, nil
@@ -1015,18 +1014,8 @@ func (c *terminalClient) WriteString(data string) error {
 
 func (c *terminalClient) Close() {
 	_ = c.stdin.Close()
-	c.Detach()
 	c.Kill()
 	_ = c.Wait()
-}
-
-func (c *terminalClient) Detach() {
-	if c.container == "" || c.clientName == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_ = exec.CommandContext(ctx, "podman", "exec", c.container, "tmux", "detach-client", "-t", c.clientName).Run()
 }
 
 func (c *terminalClient) Kill() {
@@ -1549,15 +1538,13 @@ type webSocketConn struct {
 }
 
 type terminalClient struct {
-	cmd        *exec.Cmd
-	stdin      io.WriteCloser
-	stdout     io.Reader
-	errDone    chan []byte
-	container  string
-	clientName string
-	mu         sync.Mutex
-	waitOnce   sync.Once
-	waitErr    error
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdout   io.Reader
+	errDone  chan []byte
+	mu       sync.Mutex
+	waitOnce sync.Once
+	waitErr  error
 }
 
 type authState struct {
