@@ -79,8 +79,10 @@ agent_generate_config() {
     #   "Model metadata for X not found. Defaulting to fallback metadata"
     # and falls back to a conservative context window. Setting
     # `model_context_window` top-level overrides that fallback explicitly.
-    # 131072 (128k) is a sane default for current open-weight models
-    # (Qwen3, Llama-3.x, DeepSeek-V3, gpt-oss-*); users can edit this.
+    # The value comes from POD_DEFAULT_MODEL_CONTEXT_SIZE in .env (default
+    # 131072 = 128k tokens), so users with larger-context models can bump
+    # it once in .env and every codex pod picks it up.
+    local ctx="${DEFAULT_MODEL_CONTEXT_SIZE:-131072}"
     cat <<EOF > "$config_dir/config.toml"
 # Pod Agents Manager: auto-generated. Edits to this file are preserved by
 # \`pod update\`; they're reset on \`pod start\` / \`pod restart\`.
@@ -90,10 +92,9 @@ agent_generate_config() {
 # explicitly so batch behavior is independent of this default.
 profile = "local"
 
-# Codex's built-in model catalog doesn't know about local models. Set the
-# context window explicitly to silence "Model metadata for X not found" and
-# unlock the model's real context capacity. Bump if your model supports more.
-model_context_window = 131072
+# Context window for codex's built-in metadata fallback. Sourced from
+# POD_DEFAULT_MODEL_CONTEXT_SIZE in ~/.pod_agents_config/.env.
+model_context_window = ${ctx}
 
 [model_providers.local]
 name = "Pod Agents local OpenAI-compatible"

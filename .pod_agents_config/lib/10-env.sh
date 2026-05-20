@@ -4,6 +4,9 @@
 POD_OPENAI_BASE_URL="${POD_OPENAI_BASE_URL}"
 POD_OPENAI_API_KEY="${POD_OPENAI_API_KEY}"
 POD_DEFAULT_MODEL="${POD_DEFAULT_MODEL}"
+# Context window in tokens to declare to agents that need it (e.g. codex's
+# model_context_window). Defaults to 131072 if unset.
+POD_DEFAULT_MODEL_CONTEXT_SIZE="${POD_DEFAULT_MODEL_CONTEXT_SIZE}"
 POD_IMAGE_CACHE_ROOT="${POD_IMAGE_CACHE_ROOT}"
 POD_WORKSPACES_ROOT="${POD_WORKSPACES_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
@@ -79,7 +82,7 @@ EOF
 
         printf '\033[1;36mConfiguring pod-agents-manager env at %s\033[0m\n' "$pod_env_file" > /dev/tty
 
-        for var_name in POD_OPENAI_BASE_URL POD_OPENAI_API_KEY POD_DEFAULT_MODEL POD_IMAGE_CACHE_ROOT POD_WORKSPACES_ROOT POD_BASE_IMAGE; do
+        for var_name in POD_OPENAI_BASE_URL POD_OPENAI_API_KEY POD_DEFAULT_MODEL POD_DEFAULT_MODEL_CONTEXT_SIZE POD_IMAGE_CACHE_ROOT POD_WORKSPACES_ROOT POD_BASE_IMAGE; do
             case "$var_name" in
                 POD_OPENAI_BASE_URL)
                     prompt="OpenAI-compatible base URL"
@@ -94,6 +97,11 @@ EOF
                 POD_DEFAULT_MODEL)
                     prompt="Default model"
                     fallback="Qwen3.6-35B-A3B-8bit"
+                    secret=0
+                    ;;
+                POD_DEFAULT_MODEL_CONTEXT_SIZE)
+                    prompt="Default model context window (tokens)"
+                    fallback="131072"
                     secret=0
                     ;;
                 POD_IMAGE_CACHE_ROOT)
@@ -163,6 +171,7 @@ EOF
             OPENAI_BASE_URL="$POD_OPENAI_BASE_URL"
             OPENAI_API_KEY="$POD_OPENAI_API_KEY"
             DEFAULT_MODEL="$POD_DEFAULT_MODEL"
+            DEFAULT_MODEL_CONTEXT_SIZE="$POD_DEFAULT_MODEL_CONTEXT_SIZE"
             IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
             WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
             BASE_IMAGE="$POD_BASE_IMAGE"
@@ -192,6 +201,7 @@ EOF
         : "${POD_OPENAI_BASE_URL:=http://192.168.178.67:8008/v1}"
         : "${POD_OPENAI_API_KEY:=rms-omlx}"
         : "${POD_DEFAULT_MODEL:=Qwen3.6-35B-A3B-8bit}"
+        : "${POD_DEFAULT_MODEL_CONTEXT_SIZE:=131072}"
         : "${POD_IMAGE_CACHE_ROOT:=$HOME/.cache/podman-containers}"
         : "${POD_WORKSPACES_ROOT:=$HOME/Developer}"
         : "${POD_BASE_IMAGE:=alpine}"
@@ -203,6 +213,9 @@ EOF
     : "${POD_OPENAI_BASE_URL:=${OPENAI_BASE_URL:-http://192.168.178.67:8008/v1}}"
     : "${POD_OPENAI_API_KEY:=${OPENAI_API_KEY:-rms-omlx}}"
     : "${POD_DEFAULT_MODEL:=${DEFAULT_MODEL:-Qwen3.6-35B-A3B-8bit}}"
+    # Optional. 131072 (128k) covers Qwen3, Llama-3.x, DeepSeek-V3, gpt-oss-*.
+    # Users with larger-context models bump it in .env (e.g. 262144 = 256k).
+    : "${POD_DEFAULT_MODEL_CONTEXT_SIZE:=${DEFAULT_MODEL_CONTEXT_SIZE:-131072}}"
     : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
     : "${POD_WORKSPACES_ROOT:=${WORKSPACES_ROOT:-$HOME/Developer}}"
     : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
@@ -210,6 +223,7 @@ EOF
     OPENAI_BASE_URL="$POD_OPENAI_BASE_URL"
     OPENAI_API_KEY="$POD_OPENAI_API_KEY"
     DEFAULT_MODEL="$POD_DEFAULT_MODEL"
+    DEFAULT_MODEL_CONTEXT_SIZE="$POD_DEFAULT_MODEL_CONTEXT_SIZE"
     IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
     WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
     BASE_IMAGE="$POD_BASE_IMAGE"
