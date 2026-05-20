@@ -29,5 +29,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends shellcheck
 
-      - name: Run test suite
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false  # the server module is stdlib-only; no deps to cache
+
+      - name: Run bash test suite
         run: bash tests/run.sh
+
+      - name: Run Go server tests
+        run: go test -count=1 ./...
+        working-directory: .pod_agents_config/server

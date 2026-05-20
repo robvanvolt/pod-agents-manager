@@ -628,6 +628,33 @@ t_test_all_errors_when_server_not_running() {
     return 0
 }
 
+# Runs the Go server's own test suite from inside .pod_agents_config/server/.
+# These are the negative-path auth tests, CSRF / rate-limit / Secure-cookie
+# checks, plus the existing terminal / passkey unit tests. If `go` is not
+# installed (common on a fresh laptop), we record a skip rather than failing.
+#
+# On macOS, CGO=1 builds occasionally hit a "missing LC_UUID load command"
+# dyld signing issue unrelated to our code; disabling CGO sidesteps it and
+# costs nothing because the server is stdlib-only.
+t_server_go_tests() {
+    if ! command -v go >/dev/null 2>&1; then
+        printf '  go is not installed; skipping (CI installs it)\n'
+        return 0
+    fi
+    local cgo=1
+    case "$(uname -s 2>/dev/null)" in
+        Darwin) cgo=0 ;;
+    esac
+    ( cd .pod_agents_config/server && CGO_ENABLED="$cgo" go test -count=1 ./... ) >/tmp/pod-go-test.$$.log 2>&1
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  go test failed (rc=$rc); last lines:" >&2
+        tail -20 /tmp/pod-go-test.$$.log | sed 's/^/    /' >&2
+    fi
+    rm -f /tmp/pod-go-test.$$.log
+    return "$rc"
+}
+
 t_server_token_rotate_writes_auth() {
     local sandbox out auth_file
     sandbox=$(setup_sandbox)
@@ -760,6 +787,7 @@ run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options
 run_test "test: no args prints usage"          t_test_no_args_prints_usage
 run_test "test: --all errors w/o server"       t_test_all_errors_when_server_not_running
+run_test "server: go test ./..."               t_server_go_tests
 run_test "server: token rotate writes auth"    t_server_token_rotate_writes_auth
 run_test "server: auth login curl integration" t_server_auth_login_curl_integration
 
