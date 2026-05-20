@@ -11,6 +11,13 @@ POD_IMAGE_CACHE_ROOT="${POD_IMAGE_CACHE_ROOT}"
 POD_WORKSPACES_ROOT="${POD_WORKSPACES_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
 POD_BASE_IMAGE="${POD_BASE_IMAGE}"
+
+# Optional — populate to enable the forgejo-workflow skill.
+# Used by skills/forgejo-workflow/SKILL.md for repo creation + git push auth.
+POD_FORGEJO_URL="${POD_FORGEJO_URL}"
+POD_FORGEJO_USER="${POD_FORGEJO_USER}"
+POD_FORGEJO_EMAIL="${POD_FORGEJO_EMAIL}"
+POD_FORGEJO_TOKEN="${POD_FORGEJO_TOKEN}"
 EOF
     }
 
@@ -219,6 +226,13 @@ EOF
     : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
     : "${POD_WORKSPACES_ROOT:=${WORKSPACES_ROOT:-$HOME/Developer}}"
     : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
+    # Optional Forgejo credentials — populated only if the user runs a Forgejo
+    # instance. Empty default so absent values don't break anything; the
+    # forgejo-workflow skill checks for non-empty FORGEJO_* before running.
+    : "${POD_FORGEJO_URL:=${FORGEJO_URL:-}}"
+    : "${POD_FORGEJO_USER:=${FORGEJO_USER:-}}"
+    : "${POD_FORGEJO_EMAIL:=${FORGEJO_EMAIL:-}}"
+    : "${POD_FORGEJO_TOKEN:=${FORGEJO_TOKEN:-}}"
 
     OPENAI_BASE_URL="$POD_OPENAI_BASE_URL"
     OPENAI_API_KEY="$POD_OPENAI_API_KEY"
@@ -227,6 +241,10 @@ EOF
     IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
     WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
     BASE_IMAGE="$POD_BASE_IMAGE"
+    FORGEJO_URL="$POD_FORGEJO_URL"
+    FORGEJO_USER="$POD_FORGEJO_USER"
+    FORGEJO_EMAIL="$POD_FORGEJO_EMAIL"
+    FORGEJO_TOKEN="$POD_FORGEJO_TOKEN"
 
     local initial_action="${1:-}"
     local should_auto_config=1
