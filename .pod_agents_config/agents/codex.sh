@@ -41,6 +41,24 @@ agent_build_containerfile() {
 
     write_base_node_containerfile "$build_dir" "$flavor"
     cat <<'EOF' >> "$build_dir/Containerfile"
+# Install bubblewrap so codex finds `bwrap` on PATH. Codex prefers the system
+# bubblewrap over its bundled fallback; without it codex prints
+#   "⚠ Codex could not find bubblewrap on PATH. […] Codex will use the bundled
+#    bubblewrap in the meantime."
+# on every invocation. The wrapper below passes --dangerously-bypass-approvals-
+# and-sandbox so the sandbox isn't actually exercised, but installing bwrap
+# silences the warning and lets codex use it for any internal sub-sandboxing.
+# Base-image agnostic — works on both alpine (apk) and trixie-slim (apt).
+RUN if command -v apk >/dev/null 2>&1; then \
+        apk add --no-cache bubblewrap; \
+    elif command -v apt-get >/dev/null 2>&1; then \
+        DEBIAN_FRONTEND=noninteractive apt-get update \
+            && apt-get install -y --no-install-recommends bubblewrap \
+            && rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "WARNING: no known package manager — bubblewrap not installed" >&2; \
+    fi
+
 # Install OpenAI Codex CLI via npm
 RUN npm install -g @openai/codex && npm cache clean --force
 
