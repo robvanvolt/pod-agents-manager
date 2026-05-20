@@ -62,13 +62,29 @@ RUN if command -v apk >/dev/null 2>&1; then \
 # Install OpenAI Codex CLI via npm
 RUN npm install -g @openai/codex && npm cache clean --force
 
-# Wrap the codex binary so every invocation — interactive (`pod join codex
-# dev`) AND batch (`pod batch codex …`) — bypasses the git-repo check and the
-# per-action approval / sandbox prompts. Mirrors the pattern in claude.sh.
-# Both flags are clap-global so they're accepted before OR after any
-# subcommand.
+# Wrap the codex binary so `pod batch codex …` (which uses `codex exec`) gets
+# the auto-bypass flags without the user having to remember them. The two
+# flags --skip-git-repo-check and --dangerously-bypass-approvals-and-sandbox
+# live ONLY on the `exec` subcommand's clap definition; the root command
+# (bare `codex` / interactive TUI) errors out with "unexpected argument" if
+# they're passed unconditionally. So the wrapper is context-aware: it injects
+# the flags only when the first positional is `exec`, and passes everything
+# else through untouched. The interactive case is handled by the
+# `[projects."<work_dir>"] trust_level = "trusted"` block written into
+# config.toml by agent_generate_config below — that's codex's documented
+# config-level escape hatch from the "Not inside a trusted directory" check.
 RUN mv /usr/local/bin/codex /usr/local/bin/codex-original && \
-    printf '#!/bin/sh\nexec /usr/local/bin/codex-original --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "$@"\n' > /usr/local/bin/codex && \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      '# Inject batch-mode safety flags only when invoking the exec subcommand.' \
+      'if [ "$1" = "exec" ]; then' \
+      '    sub="$1"; shift' \
+      '    exec /usr/local/bin/codex-original "$sub" \\' \
+      '        --skip-git-repo-check \\' \
+      '        --dangerously-bypass-approvals-and-sandbox "$@"' \
+      'fi' \
+      'exec /usr/local/bin/codex-original "$@"' \
+      > /usr/local/bin/codex && \
     chmod +x /usr/local/bin/codex
 
 CMD ["tail", "-f", "/dev/null"]
@@ -101,6 +117,22 @@ agent_generate_config() {
     # 131072 = 128k tokens), so users with larger-context models can bump
     # it once in .env and every codex pod picks it up.
     local ctx="${DEFAULT_MODEL_CONTEXT_SIZE:-131072}"
+
+    # Mirror the Quadlet's WorkingDir computation (see ensure_quadlet_template
+    # in 70-lifecycle.sh) so the [projects."<work_dir>"] block matches
+    # whatever directory codex is actually launched in. Without this, the
+    # interactive `codex` TUI refuses to run with "Not inside a trusted
+    # directory" — and the wrapper can't inject --skip-git-repo-check at the
+    # root level (that flag exists only on the `exec` subcommand).
+    local work_dir="/workspace"
+    if [ -n "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+        if [[ "$WORKSPACE_DIR_OVERRIDE" == /* ]]; then
+            work_dir="$WORKSPACE_DIR_OVERRIDE"
+        else
+            work_dir="/workspace/$WORKSPACE_DIR_OVERRIDE"
+        fi
+    fi
+
     cat <<EOF > "$config_dir/config.toml"
 # Pod Agents Manager: auto-generated. Edits to this file are preserved by
 # \`pod update\`; they're reset on \`pod start\` / \`pod restart\`.
@@ -113,6 +145,14 @@ profile = "local"
 # Context window for codex's built-in metadata fallback. Sourced from
 # POD_DEFAULT_MODEL_CONTEXT_SIZE in ~/.pod_agents_config/.env.
 model_context_window = ${ctx}
+
+# Mark the pod's working directory as a trusted project so the interactive
+# \`codex\` TUI doesn't refuse to launch with "Not inside a trusted directory".
+# The matching --skip-git-repo-check flag on the \`exec\` subcommand is
+# applied by the wrapper at /usr/local/bin/codex, but exists only there;
+# the root command needs this config-level trust declaration.
+[projects."${work_dir}"]
+trust_level = "trusted"
 
 [model_providers.local]
 name = "Pod Agents local OpenAI-compatible"
