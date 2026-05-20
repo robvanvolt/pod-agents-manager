@@ -19,7 +19,7 @@ Usage:
   ${_cmd} [--version|-v]
   ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base]
             [--model NAME] [--endpoint URL] [--api-key KEY]
-            [--ports HOST:CONTAINER[,...]]
+            [--ports HOST:CONTAINER[,...]] [--no-cache | --cached]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -40,6 +40,9 @@ Examples:
   ${_cmd} self-update
   ${_cmd} start pi dev all all alpine
   ${_cmd} start pi dev --model my-other-model
+  ${_cmd} update codex                 # pull the latest agent npm package
+  ${_cmd} update --cached              # rebuild from existing layers (fast)
+  ${_cmd} prebuild --no-cache          # force-rebuild every agent image
   ${_cmd} enter pi dev --endpoint http://192.168.1.10:8000/v1 --api-key sk-...
   ${_cmd} start pi dev --endpoint http://127.0.0.1:8000/v1 --api_key sk-local
   ${_cmd} join pi dev

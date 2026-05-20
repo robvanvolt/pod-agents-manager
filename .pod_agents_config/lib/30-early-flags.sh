@@ -19,6 +19,12 @@
     local API_KEY_OVERRIDE=""
     local WORKSPACE_DIR_OVERRIDE=""
     local PORTS_OVERRIDE=""
+    # Build-cache control. NO_CACHE_BUILD=1 forces `podman build --no-cache`
+    # so layers like `RUN npm install -g <pkg>` actually re-fetch upstream
+    # rather than reusing the cached layer. Set automatically by `pod update`
+    # (since "update" should mean "actually update"); opt-out via --cached.
+    # Set explicitly via --no-cache for `pod start` / `pod prebuild`.
+    local NO_CACHE_BUILD="" CACHED_BUILD=""
     local _mf_args=() _mf_skip=0 _mf_expect="" _mf_arg
     for _mf_arg in "$@"; do
         if [ "$_mf_skip" = "1" ]; then
@@ -47,6 +53,8 @@
             --workspace) _mf_skip=1; _mf_expect="workspace" ;;
             --ports) _mf_skip=1; _mf_expect="ports" ;;
             --api-key|--api_key|--apikey) _mf_skip=1; _mf_expect="api_key" ;;
+            --no-cache) NO_CACHE_BUILD=1 ;;
+            --cached)   CACHED_BUILD=1 ;;
             *)         _mf_args+=("$_mf_arg") ;;
         esac
     done

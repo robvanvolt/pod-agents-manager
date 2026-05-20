@@ -398,6 +398,15 @@ EOF
             ;;
 
         update)
+            # `pod update` exists to fetch the latest agent (npm/pip) package.
+            # Without --no-cache, `podman build --layers` happily reuses the
+            # cached `RUN npm install -g <pkg>` layer from overlay storage and
+            # the user gets the same version back. Default to no-cache so the
+            # name matches the behavior; --cached opts out for users who just
+            # want a fast rebuild from existing layers.
+            if [ -z "${CACHED_BUILD:-}" ]; then
+                NO_CACHE_BUILD=1
+            fi
             local target_agents=("${available_agents[@]}")
             [ -n "$agent" ] && target_agents=("$agent")
 
@@ -442,7 +451,13 @@ EOF
                     rm -rf "${IMAGE_CACHE_ROOT}/${a}-${detected_flavor}-${detected_base}" 2>/dev/null || true
 
                     echo -e "\033[32mApplying update and restarting instance: ${a}-${inst}...\033[0m"
-                    _pod_agents_main restart "$a" "$inst" "$detected_flavor" "all" "$detected_base"
+                    # Forward NO_CACHE_BUILD into the recursive restart call.
+                    # The inner _pod_agents_main re-runs 30-early-flags, which
+                    # declares a fresh `local NO_CACHE_BUILD=""`, so the only
+                    # reliable channel is passing --no-cache as a CLI flag.
+                    local _ncb_arg=()
+                    [ "${NO_CACHE_BUILD:-}" = "1" ] && _ncb_arg=("--no-cache")
+                    _pod_agents_main restart "$a" "$inst" "$detected_flavor" "all" "$detected_base" "${_ncb_arg[@]}"
                 done
             done
             echo -e "\033[1;32m🎉 Fleet update complete.\033[0m"
@@ -451,20 +466,30 @@ EOF
         prebuild)
             local target_agents=("${available_agents[@]}")
             [ -n "$agent" ] && target_agents=("$agent")
+            local _pre_build_flags=("--layers")
+            if [ "${NO_CACHE_BUILD:-}" = "1" ]; then
+                _pre_build_flags=("--no-cache")
+                echo -e "\033[36m--no-cache active: prebuild will rebuild every layer (network fetches included).\033[0m"
+            fi
             for a in "${target_agents[@]}"; do
                 unset -f agent_build_containerfile agent_generate_config agent_pre_update 2>/dev/null || true
                 unset AGENT_SKILLS_SUBPATH 2>/dev/null || true
                 source "$config_dir_agents/${a}.sh"
                 local pre_image="localhost/${a}-agent-${flavor}-${BASE_IMAGE_TAG}:latest"
                 if podman image exists "$pre_image"; then
-                    echo -e "\033[33m✓ ${a} (${flavor}/${BASE_IMAGE_TAG}) already built — skipping. Use 'update' to rebuild.\033[0m"
-                    continue
+                    if [ "${NO_CACHE_BUILD:-}" = "1" ]; then
+                        echo -e "\033[33m✗ Removing existing ${a} image to force fresh build...\033[0m"
+                        podman image rm -f "$pre_image" 2>/dev/null || true
+                    else
+                        echo -e "\033[33m✓ ${a} (${flavor}/${BASE_IMAGE_TAG}) already built — skipping. Use 'update' or 'prebuild --no-cache' to rebuild.\033[0m"
+                        continue
+                    fi
                 fi
                 local pre_build_dir="${IMAGE_CACHE_ROOT}/${a}-${flavor}-${BASE_IMAGE_TAG}"
                 echo -e "\033[36mPrebuilding ${a} (${flavor}/${BASE_IMAGE_TAG})...\033[0m"
                 mkdir -p "$pre_build_dir"
                 agent_build_containerfile "$pre_build_dir" "$flavor" "$BASE_IMAGE_FULL"
-                podman build --layers -t "$pre_image" -f "$pre_build_dir/Containerfile" "$pre_build_dir" || continue
+                podman build "${_pre_build_flags[@]}" -t "$pre_image" -f "$pre_build_dir/Containerfile" "$pre_build_dir" || continue
                 echo -e "\033[32m✓ Prebuilt $pre_image\033[0m"
             done
             echo -e "\033[1;32m🎉 Prebuild complete. Subsequent 'pod start' is now near-instant.\033[0m"
@@ -472,11 +497,18 @@ EOF
 
         start|restart)
             local build_dir="${IMAGE_CACHE_ROOT}/${agent}-${flavor}-${BASE_IMAGE_TAG}"
+            local _build_flags=("--layers")
+            if [ "${NO_CACHE_BUILD:-}" = "1" ]; then
+                _build_flags=("--no-cache")
+                echo -e "\033[36m--no-cache active: forcing fresh layer build (npm/apk fetches will hit the network).\033[0m"
+                # Drop any pre-existing image so the build path below fires.
+                podman image rm -f "$image_name" 2>/dev/null || true
+            fi
             if ! podman image exists "$image_name"; then
                 echo -e "\033[36mLocal image not found. Building ${agent} (${flavor}/${BASE_IMAGE_TAG})...\033[0m"
                 mkdir -p "$build_dir"
                 agent_build_containerfile "$build_dir" "$flavor" "$BASE_IMAGE_FULL"
-                podman build --layers -t "$image_name" -f "$build_dir/Containerfile" "$build_dir"
+                podman build "${_build_flags[@]}" -t "$image_name" -f "$build_dir/Containerfile" "$build_dir"
             fi
 
             # Render quadlet to a tmp file first; only daemon-reload if the file actually changed.

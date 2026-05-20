@@ -294,6 +294,25 @@ t_pod_doctor_runs() {
 # `pod start` (no podman on dev machines), so we exercise parsing via doctor:
 # `pod doctor --model my-model` should still print the doctor banner instead
 # of failing with "--model requires a value" or being treated as an action.
+# `--no-cache` and `--cached` are boolean flags stripped by 30-early-flags
+# so the positional contract stays clean. Exercise via `pod doctor` which
+# doesn't actually build anything but does require successful arg parsing.
+t_no_cache_flag_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --no-cache 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_cached_flag_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --cached 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
 t_model_flag_parses() {
     local sandbox out rc
     sandbox=$(setup_sandbox)
@@ -769,6 +788,8 @@ run_test "version: matches version.conf"       t_pod_version_matches_conf
 run_test "smoke: pod errors w/o lib/"          t_pod_errors_when_lib_missing
 run_test "smoke: pod doctor runs"              t_pod_doctor_runs
 run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_count
+run_test "build flag: --no-cache parses"       t_no_cache_flag_parses
+run_test "build flag: --cached parses"         t_cached_flag_parses
 run_test "model flag: --model VAL parses"      t_model_flag_parses
 run_test "model flag: --model=VAL parses"      t_model_flag_eq_form_parses
 run_test "model flag: missing value errors"    t_model_flag_missing_value_errors
