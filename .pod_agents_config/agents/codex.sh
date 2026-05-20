@@ -40,6 +40,38 @@ agent_build_containerfile() {
     local flavor="$2"
 
     write_base_node_containerfile "$build_dir" "$flavor"
+
+    # Wrap the codex binary so `pod batch codex …` (which uses `codex exec`)
+    # gets the auto-bypass flags without the user having to remember them.
+    # The two flags --skip-git-repo-check and --dangerously-bypass-approvals-
+    # and-sandbox live ONLY on the `exec` subcommand's clap definition; the
+    # root command (bare `codex` / interactive TUI) errors out with
+    # "unexpected argument" if they're passed unconditionally. So the
+    # wrapper is context-aware: it injects the flags only when the first
+    # positional is `exec`, and passes everything else through untouched.
+    # The interactive case is handled by the [projects."<work_dir>"]
+    # trust_level = "trusted" block written into config.toml by
+    # agent_generate_config below — that's codex's documented config-level
+    # escape hatch from the "Not inside a trusted directory" check.
+    #
+    # Writing the wrapper to a separate file + COPY (rather than building it
+    # inline via printf in a Dockerfile RUN) avoids every shell-escape
+    # pitfall around backslash line-continuations getting double-escaped.
+    cat <<'WRAPPER' > "$build_dir/codex-wrapper.sh"
+#!/bin/sh
+# /usr/local/bin/codex — pod-agents-manager wrapper around /usr/local/bin/codex-original.
+# Injects batch-mode safety flags ONLY when invoking the `exec` subcommand,
+# because they don't exist on codex's root command and would error out there.
+if [ "$1" = "exec" ]; then
+    sub="$1"; shift
+    exec /usr/local/bin/codex-original "$sub" \
+        --skip-git-repo-check \
+        --dangerously-bypass-approvals-and-sandbox "$@"
+fi
+exec /usr/local/bin/codex-original "$@"
+WRAPPER
+    chmod +x "$build_dir/codex-wrapper.sh"
+
     cat <<'EOF' >> "$build_dir/Containerfile"
 # Install bubblewrap so codex finds `bwrap` on PATH. Codex prefers the system
 # bubblewrap over its bundled fallback; without it codex prints
@@ -62,30 +94,10 @@ RUN if command -v apk >/dev/null 2>&1; then \
 # Install OpenAI Codex CLI via npm
 RUN npm install -g @openai/codex && npm cache clean --force
 
-# Wrap the codex binary so `pod batch codex …` (which uses `codex exec`) gets
-# the auto-bypass flags without the user having to remember them. The two
-# flags --skip-git-repo-check and --dangerously-bypass-approvals-and-sandbox
-# live ONLY on the `exec` subcommand's clap definition; the root command
-# (bare `codex` / interactive TUI) errors out with "unexpected argument" if
-# they're passed unconditionally. So the wrapper is context-aware: it injects
-# the flags only when the first positional is `exec`, and passes everything
-# else through untouched. The interactive case is handled by the
-# `[projects."<work_dir>"] trust_level = "trusted"` block written into
-# config.toml by agent_generate_config below — that's codex's documented
-# config-level escape hatch from the "Not inside a trusted directory" check.
-RUN mv /usr/local/bin/codex /usr/local/bin/codex-original && \
-    printf '%s\n' \
-      '#!/bin/sh' \
-      '# Inject batch-mode safety flags only when invoking the exec subcommand.' \
-      'if [ "$1" = "exec" ]; then' \
-      '    sub="$1"; shift' \
-      '    exec /usr/local/bin/codex-original "$sub" \\' \
-      '        --skip-git-repo-check \\' \
-      '        --dangerously-bypass-approvals-and-sandbox "$@"' \
-      'fi' \
-      'exec /usr/local/bin/codex-original "$@"' \
-      > /usr/local/bin/codex && \
-    chmod +x /usr/local/bin/codex
+# Install the subcommand-aware wrapper (see codex-wrapper.sh in the build dir).
+RUN mv /usr/local/bin/codex /usr/local/bin/codex-original
+COPY codex-wrapper.sh /usr/local/bin/codex
+RUN chmod +x /usr/local/bin/codex
 
 CMD ["tail", "-f", "/dev/null"]
 EOF

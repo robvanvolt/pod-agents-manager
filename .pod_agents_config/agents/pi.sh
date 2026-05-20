@@ -8,7 +8,7 @@ agent_build_containerfile() {
     local flavor="$2"
     write_base_node_containerfile "$build_dir" "$flavor"
     cat <<'EOF' >> "$build_dir/Containerfile"
-RUN npm install -g @mariozechner/pi-coding-agent && npm cache clean --force
+RUN npm install -g @earendil-works/pi-coding-agent && npm cache clean --force
 CMD ["tail", "-f", "/dev/null"]
 EOF
 }
