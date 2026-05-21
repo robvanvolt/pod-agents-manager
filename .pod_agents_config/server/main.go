@@ -39,6 +39,8 @@ var (
 	auditMutex           sync.Mutex
 	loginRateMutex       sync.Mutex
 	loginRateAttempts    = map[string]*loginRateState{}
+	activityProbeMutex   sync.Mutex
+	activityProbeCapture = map[string]string{}
 	activityBusyCPUPct   = 1.0
 	activityProbeTimeout = 900 * time.Millisecond
 )
@@ -1048,24 +1050,26 @@ func enrichActivity(row map[string]any, root string) {
 }
 
 func detectActivity(container string, cpuPct float64) (string, string) {
-	if cpuPct >= activityBusyCPUPct {
-		return "running", fmt.Sprintf("cpu %.2f%%", cpuPct)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), activityProbeTimeout)
 	defer cancel()
 
 	script := `if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux display-message -p -t bot:0.0 "#{pane_current_command}"; printf '\n---POD_CAPTURE---\n'; tmux capture-pane -p -t bot:0.0 -S -30; else printf 'no-session\n'; fi`
 	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
+		if cpuPct >= activityBusyCPUPct {
+			return "running", fmt.Sprintf("cpu %.2f%%; activity probe timed out", cpuPct)
+		}
 		return "unknown", "activity probe timed out"
 	}
 	if err != nil {
+		if cpuPct >= activityBusyCPUPct {
+			return "running", fmt.Sprintf("cpu %.2f%%; %s", cpuPct, strings.TrimSpace(stripANSI(string(out))))
+		}
 		return "unknown", strings.TrimSpace(stripANSI(string(out)))
 	}
 
 	command, capture := splitActivityProbeOutput(string(out))
-	return classifyLowCPUActivity(command, capture)
+	return classifyLowCPUActivityWithStability(command, capture, activityCaptureStable(container, command, capture))
 }
 
 func splitActivityProbeOutput(out string) (string, string) {
@@ -1078,6 +1082,10 @@ func splitActivityProbeOutput(out string) (string, string) {
 }
 
 func classifyLowCPUActivity(command, capture string) (string, string) {
+	return classifyLowCPUActivityWithStability(command, capture, true)
+}
+
+func classifyLowCPUActivityWithStability(command, capture string, captureStable bool) (string, string) {
 	command = strings.TrimSpace(command)
 	switch command {
 	case "", "no-session":
@@ -1086,10 +1094,24 @@ func classifyLowCPUActivity(command, capture string) (string, string) {
 		return "idle", "agent pane is waiting at a shell"
 	default:
 		if captureLooksIdle(capture) {
-			return "idle", "agent pane is waiting for input: " + command
+			if !captureStable {
+				return "running", "terminal pane changed: " + command
+			}
+			return "idle", idleActivityDetail(command, capture)
 		}
 		return "running", "foreground command: " + command
 	}
+}
+
+func activityCaptureStable(container, command, capture string) bool {
+	fingerprint := tokenHash(strings.TrimSpace(command) + "\n" + strings.TrimSpace(stripANSI(capture)))
+
+	activityProbeMutex.Lock()
+	defer activityProbeMutex.Unlock()
+
+	previous, ok := activityProbeCapture[container]
+	activityProbeCapture[container] = fingerprint
+	return ok && previous == fingerprint
 }
 
 func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string) {
@@ -1729,21 +1751,78 @@ func trimTerminalOutput(output string) string {
 func captureLooksIdle(capture string) bool {
 	lines := recentNonEmptyLines(capture, 8)
 	for _, line := range lines {
-		lower := strings.ToLower(line)
-		if idlePathLineRe.MatchString(line) {
-			return true
-		}
-		if strings.Contains(lower, "type a message") ||
-			strings.Contains(lower, "send a message") ||
-			strings.Contains(lower, "waiting for input") ||
-			strings.Contains(lower, "press enter to continue") {
-			return true
-		}
-		if strings.HasPrefix(line, ">") && len(line) <= 4 {
+		if lineLooksIdlePrompt(line) {
 			return true
 		}
 	}
 	return false
+}
+
+func lineLooksIdlePrompt(line string) bool {
+	line = strings.TrimSpace(strings.Trim(line, "│┃┆┊ "))
+	lower := strings.ToLower(line)
+	if idlePathLineRe.MatchString(line) {
+		return true
+	}
+	if strings.Contains(lower, "ask your question") ||
+		strings.Contains(lower, "type a message") ||
+		strings.Contains(lower, "send a message") ||
+		strings.Contains(lower, "waiting for input") ||
+		strings.Contains(lower, "press enter to continue") {
+		return true
+	}
+	return strings.HasPrefix(line, ">") && len(line) <= 4
+}
+
+func idleActivityDetail(command, capture string) string {
+	if excerpt := idleHoverExcerpt(capture); excerpt != "" {
+		return "waiting for input: " + excerpt
+	}
+	return "agent pane is waiting for input: " + command
+}
+
+func idleHoverExcerpt(capture string) string {
+	lines := strings.Split(strings.ReplaceAll(stripANSI(capture), "\r\n", "\n"), "\n")
+	prompt := -1
+	for i := len(lines) - 1; i >= 0; i-- {
+		if lineLooksIdlePrompt(lines[i]) {
+			prompt = i
+			break
+		}
+	}
+	if prompt < 0 {
+		return ""
+	}
+
+	excerpt := []string{}
+	for i := prompt - 1; i >= 0; i-- {
+		line := cleanHoverLine(lines[i])
+		if line == "" || terminalDividerLine(line) {
+			if len(excerpt) > 0 {
+				break
+			}
+			continue
+		}
+		excerpt = append([]string{line}, excerpt...)
+		if len(excerpt) == 4 {
+			break
+		}
+	}
+	text := strings.Join(strings.Fields(strings.Join(excerpt, " ")), " ")
+	runes := []rune(text)
+	if len(runes) > 320 {
+		text = string(runes[:319]) + "..."
+	}
+	return text
+}
+
+func cleanHoverLine(line string) string {
+	return strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "│┃┆┊ "))
+}
+
+func terminalDividerLine(line string) bool {
+	line = strings.TrimSpace(line)
+	return len([]rune(line)) >= 8 && strings.Trim(line, "-_=─━═ ") == ""
 }
 
 func recentNonEmptyLines(s string, max int) []string {

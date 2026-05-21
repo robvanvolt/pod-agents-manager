@@ -198,7 +198,7 @@
     const activityBadge = (state, detail) => {
       const safeState = String(state || 'unknown').toLowerCase();
       const label = safeState === 'running' ? 'running' : safeState === 'idle' ? 'idle' : safeState;
-      const title = String(detail || '').replace(/"/g, '&quot;');
+      const title = escapeHTML(detail || '');
       return `<span class="activity-badge ${safeState}" title="${title}"><span></span>${label}</span>`;
     };
     const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({

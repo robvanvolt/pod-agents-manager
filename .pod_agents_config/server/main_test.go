@@ -95,6 +95,58 @@ func TestClassifyLowCPUForegroundCommandAsRunning(t *testing.T) {
 	}
 }
 
+func TestClassifyCommandCodeQuestionPromptAsIdleWithHoverExcerpt(t *testing.T) {
+	capture := `
+Done. The roadmap is at /workspace/ROADMAP.md.
+
+The core narrative: Agent Skill Smith becomes the standard for Claude tools.
+Every Claude developer already lives there.
+
+----------------------------------------------------
+Ask your question...
+----------------------------------------------------
+? for shortcuts
+`
+	state, detail := classifyLowCPUActivity("node", capture)
+	if state != "idle" {
+		t.Fatalf("got %q/%q, want idle", state, detail)
+	}
+	if !strings.Contains(detail, "waiting for input:") || !strings.Contains(detail, "The core narrative:") {
+		t.Fatalf("hover detail does not include idle marker and excerpt: %q", detail)
+	}
+	if strings.Contains(detail, "Ask your question") {
+		t.Fatalf("hover detail should use response text, got %q", detail)
+	}
+}
+
+func TestMovingQuestionPromptRemainsRunning(t *testing.T) {
+	capture := `
+Still working on tool output...
+
+Ask your question...
+`
+	state, detail := classifyLowCPUActivityWithStability("node", capture, false)
+	if state != "running" || !strings.Contains(detail, "terminal pane changed") {
+		t.Fatalf("got %q/%q, want moving terminal to stay running", state, detail)
+	}
+}
+
+func TestActivityCaptureStableWaitsForSamePane(t *testing.T) {
+	activityProbeMutex.Lock()
+	activityProbeCapture = map[string]string{}
+	activityProbeMutex.Unlock()
+
+	if activityCaptureStable("command-code-main", "node", "first capture") {
+		t.Fatal("first capture should not count as stable")
+	}
+	if activityCaptureStable("command-code-main", "node", "changed capture") {
+		t.Fatal("changed capture should not count as stable")
+	}
+	if !activityCaptureStable("command-code-main", "node", "changed capture") {
+		t.Fatal("same capture should count as stable")
+	}
+}
+
 func TestSplitTerminalProbeOutput(t *testing.T) {
 	header, capture := splitTerminalProbeOutput("pi|42|120\n---POD_TERMINAL_CAPTURE---\nhello\n")
 	if header != "pi|42|120" || capture != "hello\n" {
