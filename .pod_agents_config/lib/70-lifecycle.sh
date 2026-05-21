@@ -262,6 +262,8 @@ Environment=POD_FORGEJO_URL=${FORGEJO_URL}
 Environment=POD_FORGEJO_USER=${FORGEJO_USER}
 Environment=POD_FORGEJO_EMAIL=${FORGEJO_EMAIL}
 Environment=POD_FORGEJO_TOKEN=${FORGEJO_TOKEN}
+Environment=WEB_BROWSER=${WEB_BROWSER}
+Environment=POD_WEB_BROWSER=${POD_WEB_BROWSER}
 NoNewPrivileges=true
 Exec=sleep infinity
 
@@ -614,6 +616,8 @@ EOF
                     -e OPENAI_API_KEY="$OPENAI_API_KEY" \
                     -e DEFAULT_MODEL="$DEFAULT_MODEL" \
                     -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" \
+                    -e WEB_BROWSER="$WEB_BROWSER" \
+                    -e POD_WEB_BROWSER="$POD_WEB_BROWSER" \
                     "$container_name" \
                     bash -lc 'tmux new-session -d -s bot "bash -lc \"${POD_AGENT} || true; exec bash\""'
             fi
@@ -626,6 +630,8 @@ EOF
                 -e OPENAI_API_KEY="$OPENAI_API_KEY" \
                 -e DEFAULT_MODEL="$DEFAULT_MODEL" \
                 -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" \
+                -e WEB_BROWSER="$WEB_BROWSER" \
+                -e POD_WEB_BROWSER="$POD_WEB_BROWSER" \
                 "$container_name" \
                 tmux attach -t bot
             ;;
@@ -648,7 +654,7 @@ EOF
                 agent_generate_config "$config_dir" "restart"
                 _pod_normalize_config_perms "$config_dir" "$container_name" "$AGENT_VOLUME_CONFIG_PATH"
             fi
-            podman exec -it "${exec_args[@]}" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" "$container_name" bash
+            podman exec -it "${exec_args[@]}" -e OPENAI_BASE_URL="$OPENAI_BASE_URL" -e OPENAI_API_BASE="$OPENAI_BASE_URL" -e OPENAI_API_KEY="$OPENAI_API_KEY" -e DEFAULT_MODEL="$DEFAULT_MODEL" -e POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" -e WEB_BROWSER="$WEB_BROWSER" -e POD_WEB_BROWSER="$POD_WEB_BROWSER" "$container_name" bash
             ;;
         *)
             echo "Unknown action: $action"

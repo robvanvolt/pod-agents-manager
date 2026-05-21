@@ -12,6 +12,9 @@ POD_WORKSPACES_ROOT="${POD_WORKSPACES_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
 POD_BASE_IMAGE="${POD_BASE_IMAGE}"
 
+# Optional — populate to enable the web skill via a Cloakbrowser/CDP service.
+POD_WEB_BROWSER="${POD_WEB_BROWSER}"
+
 # Optional — populate to enable the forgejo-workflow skill.
 # Used by skills/forgejo-workflow/SKILL.md for repo creation + git push auth.
 POD_FORGEJO_URL="${POD_FORGEJO_URL}"
@@ -212,6 +215,7 @@ EOF
         : "${POD_IMAGE_CACHE_ROOT:=$HOME/.cache/podman-containers}"
         : "${POD_WORKSPACES_ROOT:=$HOME/Developer}"
         : "${POD_BASE_IMAGE:=alpine}"
+        : "${POD_WEB_BROWSER:=}"
         _pod_write_env_file "$pod_env_file"
     fi
 
@@ -226,6 +230,8 @@ EOF
     : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
     : "${POD_WORKSPACES_ROOT:=${WORKSPACES_ROOT:-$HOME/Developer}}"
     : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
+    # Optional Cloakbrowser/CDP endpoint for the web skill.
+    : "${POD_WEB_BROWSER:=${WEB_BROWSER:-}}"
     # Optional Forgejo credentials — populated only if the user runs a Forgejo
     # instance. Empty default so absent values don't break anything; the
     # forgejo-workflow skill checks for non-empty FORGEJO_* before running.
@@ -241,6 +247,7 @@ EOF
     IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT"
     WORKSPACES_ROOT="$POD_WORKSPACES_ROOT"
     BASE_IMAGE="$POD_BASE_IMAGE"
+    WEB_BROWSER="$POD_WEB_BROWSER"
     FORGEJO_URL="$POD_FORGEJO_URL"
     FORGEJO_USER="$POD_FORGEJO_USER"
     FORGEJO_EMAIL="$POD_FORGEJO_EMAIL"
