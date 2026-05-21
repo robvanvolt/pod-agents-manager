@@ -2,8 +2,9 @@
 # https://commandcode.ai/docs
 #
 # Frontier coding-agent CLI, installed via `npm i -g command-code`. The binary
-# is named `cmd`. Non-interactive one-shot mode is `cmd --print "<prompt>"`,
-# which is exactly what `pod batch` needs.
+# is named `cmd`. Headless one-shot mode is `cmd --print "<prompt>" --yolo`,
+# which is exactly what `pod batch` needs: autonomous execution inside the pod
+# sandbox, then exit back to the shell.
 #
 # Local-LLM note: Command Code's documented providers are
 #   1. Command Code (their hosted backend; needs `cmd login` for OAuth)
@@ -28,7 +29,7 @@ AGENT_VOLUME_CONFIG_PATH="/root/.commandcode"
 AGENT_SKILLS_SUBPATH="skills"
 
 # Non-interactive prompt mode for `pod batch` and `pod test`.
-AGENT_BATCH_INVOKE='cmd --print "$PROMPT"'
+AGENT_BATCH_INVOKE='cmd --print "$PROMPT" --yolo'
 
 agent_build_containerfile() {
     local build_dir="$1"
