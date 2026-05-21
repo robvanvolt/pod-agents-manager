@@ -11,8 +11,9 @@ this is now the living roadplan for the next work.
 - Current version source: `.pod_agents_config/version.conf`.
 - Shipped agent plugins: Claude Code, Codex, Command Code, OpenCode, Crush, Pi,
   Hermes, and Nanocoder.
-- Current dashboard surface: stats, info, auth, passkeys, terminal overlay,
-  inbox/instruct, lifecycle actions, pod creation, and sham `/v1/*` endpoints.
+- Current dashboard surface: stats, info, auth, passkeys, terminal and journal
+  overlays, inbox/instruct, lifecycle actions, pod creation, and sham `/v1/*`
+  endpoints.
 - Current CLI surface: lifecycle, build/update, `tmux`, batch, inbox, ask,
   instruct, server auth/token helpers, doctor, and agent sham testing.
 - Current 0.6 progress: dashboard audit writes now rotate to timestamped
@@ -20,6 +21,8 @@ this is now the living roadplan for the next work.
   operator passkeys can be renamed or deleted from the dashboard.
 - Dashboard stats now surface published pod port mappings and turn
   browser-reachable TCP host ports into new-tab links.
+- Operator mode can inspect bounded per-pod `journalctl --user` snapshots from
+  the dashboard.
 
 ## Shipped milestones
 
@@ -88,7 +91,6 @@ Must-have:
 
 - Batch dashboard page with progress, ETA, logs, stop controls, and result
   summaries.
-- Dashboard log/journal viewer for `journalctl --user -u <pod>.service`.
 - HTTPS/reverse-proxy docs, including `POD_SERVER_FORCE_SECURE_COOKIE=1`.
 - Dashboard install/update card showing local version, active channel, and
   latest `main`/`dev` version.

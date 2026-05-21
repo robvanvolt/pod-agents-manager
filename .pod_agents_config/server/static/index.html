@@ -80,6 +80,21 @@
       </div>
     </div>
   </dialog>
+  <dialog id="log-dialog" class="terminal-dialog log-dialog">
+    <div class="terminal-panel">
+      <div class="terminal-head">
+        <div class="terminal-title-row">
+          <h2 id="log-title">Journal</h2>
+          <p id="log-meta">waiting for logs</p>
+        </div>
+        <div class="log-head-actions">
+          <button type="button" title="Refresh journal" aria-label="Refresh journal" onclick="loadLogs()">refresh</button>
+          <button type="button" aria-label="Close journal" onclick="closeLogs()">×</button>
+        </div>
+      </div>
+      <pre id="log-output" class="log-screen">Loading journal…</pre>
+    </div>
+  </dialog>
 
   <div class="card table-card">
   <table>
@@ -120,6 +135,7 @@
     let authState = { role: 'viewer', authenticated: false };
     let passkeyCache = [];
     let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, term: null, rendering: false };
+    let logState = { agent: '', instance: '' };
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -501,6 +517,7 @@
         const actions = (agent && instance) ? `
           <div class="inline">
             <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View terminal" aria-label="View terminal for ${agent}-${instance}" onclick="openTerminal('${agent}','${instance}')">${binocularIcon()}</button>
+            <button data-operator-action ${canWrite ? '' : 'disabled'} onclick="openLogs('${agent}','${instance}')">logs</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('restart','${agent}','${instance}')">restart</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('stop','${agent}','${instance}')">stop</button>
             <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('start','${agent}','${instance}')">start</button>
@@ -553,6 +570,54 @@
       closeTerminalSocket();
       const dialog = document.getElementById('terminal-dialog');
       if (dialog?.open) dialog.close();
+    }
+
+    function openLogs(agent, instance) {
+      const dialog = document.getElementById('log-dialog');
+      if (!dialog) return;
+      logState.agent = agent;
+      logState.instance = instance;
+      document.getElementById('log-title').textContent = `${agent}-${instance} journal`;
+      document.getElementById('log-meta').textContent = 'loading journal…';
+      document.getElementById('log-output').textContent = 'Loading journal…';
+      dialog.showModal();
+      loadLogs();
+    }
+
+    function closeLogs() {
+      const dialog = document.getElementById('log-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    async function loadLogs() {
+      if (!logState.agent || !logState.instance) return;
+      const meta = document.getElementById('log-meta');
+      const output = document.getElementById('log-output');
+      await fetchAuthStatus();
+      if (authState.role !== 'operator') {
+        meta.textContent = 'journal locked';
+        output.textContent = 'Unlock operator mode first.\n\nJournal snapshots require an active operator session.';
+        return;
+      }
+      meta.textContent = 'loading journal…';
+      const params = new URLSearchParams({ agent: logState.agent, instance: logState.instance });
+      try {
+        const res = await fetch(`/api/logs?${params.toString()}`);
+        const text = await res.text();
+        if (!res.ok) {
+          meta.textContent = 'journal failed';
+          output.textContent = res.status === 401 ? 'Unlock operator mode first.' : text;
+          return;
+        }
+        const data = JSON.parse(text);
+        const captured = data.captured_at ? new Date(data.captured_at).toLocaleTimeString() : 'now';
+        meta.textContent = `${data.unit || 'journal'} · last ${data.lines || '?'} lines · ${captured}`;
+        output.textContent = data.output || '(no journal entries)';
+        output.scrollTop = output.scrollHeight;
+      } catch (err) {
+        meta.textContent = 'journal failed';
+        output.textContent = 'Network error: ' + err;
+      }
     }
 
     async function connectTerminalSocket() {

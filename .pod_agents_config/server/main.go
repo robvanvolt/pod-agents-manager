@@ -485,6 +485,31 @@ func main() {
 		json.NewEncoder(w).Encode(snapshot)
 	})
 
+	mux.HandleFunc("/api/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth := currentAuthContext(r, root)
+		if auth.Role != "operator" {
+			http.Error(w, "operator role required", http.StatusUnauthorized)
+			return
+		}
+		agent := strings.TrimSpace(r.URL.Query().Get("agent"))
+		instance := strings.TrimSpace(r.URL.Query().Get("instance"))
+		if !validIdent(agent) || !validIdent(instance) {
+			http.Error(w, "invalid agent/instance", http.StatusBadRequest)
+			return
+		}
+		snapshot, err := capturePodJournal(agent, instance, journalLineLimitFromRequest(r))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(snapshot)
+	})
+
 	mux.HandleFunc("/api/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleTerminalWebSocket(w, r, root)
 	})
@@ -1315,6 +1340,58 @@ func captureTerminal(container string, lines int) (terminalSnapshot, error) {
 	return snapshot, nil
 }
 
+func capturePodJournal(agent, instance string, lines int) (journalSnapshot, error) {
+	if lines <= 0 || lines > 800 {
+		lines = 240
+	}
+	snapshot := journalSnapshot{
+		Agent:      agent,
+		Instance:   instance,
+		Unit:       podJournalUnit(agent, instance),
+		Lines:      lines,
+		CapturedAt: time.Now().Format(time.RFC3339),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx,
+		"journalctl",
+		"--user",
+		"--unit", snapshot.Unit,
+		"--lines", strconv.Itoa(lines),
+		"--no-pager",
+		"--output", "short-iso",
+	).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return snapshot, fmt.Errorf("journal capture timed out")
+	}
+	if err != nil {
+		msg := strings.TrimSpace(stripANSI(string(out)))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return snapshot, fmt.Errorf("%s", msg)
+	}
+	snapshot.Output = strings.TrimSpace(stripANSI(string(out)))
+	if snapshot.Output == "" {
+		snapshot.Output = "(no journal entries)"
+	}
+	return snapshot, nil
+}
+
+func podJournalUnit(agent, instance string) string {
+	return agent + "@" + instance + ".service"
+}
+
+func journalLineLimitFromRequest(r *http.Request) int {
+	lines, _ := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("lines")))
+	if lines <= 0 || lines > 800 {
+		return 240
+	}
+	return lines
+}
+
 func startTerminalSession(agent, instance string) error {
 	container := agent + "-" + instance
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1753,6 +1830,15 @@ type terminalSnapshot struct {
 	Command    string `json:"command"`
 	Rows       string `json:"rows,omitempty"`
 	Cols       string `json:"cols,omitempty"`
+	Output     string `json:"output"`
+	CapturedAt string `json:"captured_at"`
+}
+
+type journalSnapshot struct {
+	Agent      string `json:"agent"`
+	Instance   string `json:"instance"`
+	Unit       string `json:"unit"`
+	Lines      int    `json:"lines"`
 	Output     string `json:"output"`
 	CapturedAt string `json:"captured_at"`
 }

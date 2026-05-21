@@ -148,6 +148,26 @@ func TestTerminalSizeFromRequest(t *testing.T) {
 	}
 }
 
+func TestPodJournalUnit(t *testing.T) {
+	if got := podJournalUnit("command-code", "main"); got != "command-code@main.service" {
+		t.Fatalf("got %q, want command-code@main.service", got)
+	}
+}
+
+func TestJournalLineLimitFromRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?lines=480", nil)
+	if got := journalLineLimitFromRequest(req); got != 480 {
+		t.Fatalf("got %d, want 480", got)
+	}
+
+	for _, target := range []string{"/api/logs", "/api/logs?lines=0", "/api/logs?lines=9999"} {
+		req = httptest.NewRequest(http.MethodGet, target, nil)
+		if got := journalLineLimitFromRequest(req); got != 240 {
+			t.Fatalf("%s got %d, want default 240", target, got)
+		}
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {
