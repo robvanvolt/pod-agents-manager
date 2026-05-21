@@ -293,7 +293,7 @@ published on npm when this was added.
 Dashboard writes are protected by local operator auth. Viewers can load the
 dashboard and inspect stats without a login; creating, deleting, starting,
 stopping, restarting, queuing instructions, opening the live terminal, and
-registering passkeys require unlocking operator mode.
+registering or managing passkeys require unlocking operator mode.
 
 ```bash
 pod server token rotate   # prints a one-time operator token
@@ -322,9 +322,9 @@ pod server token rotate    # prints a one-time bootstrap token
 
 Click **Unlock** in the dashboard and paste the token. The session lasts 24
 hours per browser. Once unlocked, click **Register Passkey** to add a local
-device passkey for future logins. Passkeys require a browser WebAuthn secure
-context, so use HTTPS or localhost. For a remote sandbox or LAN host, a quick
-setup path is:
+device passkey for future logins, or **Passkeys** to rename/delete registered
+credentials. Passkeys require a browser WebAuthn secure context, so use HTTPS
+or localhost. For a remote sandbox or LAN host, a quick setup path is:
 
 ```bash
 ssh -L 1337:127.0.0.1:1337 nuc
@@ -412,7 +412,7 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
   login rate limiting, conditional secure cookies, and audit JSONL for
   dashboard writes.
 - **0.6 started:** automatic audit log rotation and archive pruning for
-  dashboard write logs.
+  dashboard write logs, plus dashboard passkey rename/delete management.
 - **0.5.1 agent smoke tests:** built-in OpenAI/Anthropic sham endpoints,
   `pod test <agent>`, `pod test --all`, and agent invocation fixes for the
   current plugin set.
@@ -427,7 +427,7 @@ cold to a stranger.
 - **Notification foundation:** browser subscription storage, local delivery tests, and rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
 - **Batch dashboard page:** progress, ETA, logs, stop controls, and result summaries.
 - **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
-- **Auth management polish:** passkey deletion/renaming UI, HTTPS helper docs, and clearer recovery docs for headless hosts.
+- **Auth management polish:** HTTPS helper docs and clearer recovery docs for headless hosts.
 - **Dashboard install/update card:** local version, channel, and latest `main`/`dev` version status.
 - **Per-pod notes, tags, and favorite workspaces** stored beside each workspace.
 - **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -369,6 +370,61 @@ func TestSessionCookieSecureFlagUsesTLSOrEnv(t *testing.T) {
 	setSessionCookie(rec, req, "session-token")
 	if !rec.Result().Cookies()[0].Secure {
 		t.Fatal("expected forced secure cookie")
+	}
+}
+
+func TestPasskeyManagementRenamesDeletesAndHidesPublicKey(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().Format(time.RFC3339)
+	if err := saveAuthState(root, authState{
+		BootstrapTokenSHA256: tokenHash("secret-token"),
+		CreatedAt:            now,
+		UpdatedAt:            now,
+		Passkeys: []passkeyCredential{{
+			ID:        "cred-1",
+			PublicKey: "secret-public-key",
+			CreatedAt: now,
+			Label:     "old label",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := listPasskeys(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0].ID != "cred-1" || keys[0].Label != "old label" {
+		t.Fatalf("unexpected passkey summary: %#v", keys)
+	}
+	data, err := json.Marshal(keys[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "secret-public-key") {
+		t.Fatalf("public key leaked in summary: %s", string(data))
+	}
+
+	if err := renamePasskey(root, "cred-1", "new label"); err != nil {
+		t.Fatal(err)
+	}
+	keys, err = listPasskeys(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys[0].Label != "new label" {
+		t.Fatalf("got label %q, want new label", keys[0].Label)
+	}
+
+	if err := deletePasskey(root, "cred-1"); err != nil {
+		t.Fatal(err)
+	}
+	keys, err = listPasskeys(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 0 {
+		t.Fatalf("got %d passkeys after delete, want 0", len(keys))
 	}
 }
 

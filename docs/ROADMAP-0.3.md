@@ -16,7 +16,8 @@ this is now the living roadplan for the next work.
 - Current CLI surface: lifecycle, build/update, `tmux`, batch, inbox, ask,
   instruct, server auth/token helpers, doctor, and agent sham testing.
 - Current 0.6 progress: dashboard audit writes now rotate to timestamped
-  `audit.*.jsonl` archives with configurable size and retention limits.
+  `audit.*.jsonl` archives with configurable size and retention limits, and
+  operator passkeys can be renamed or deleted from the dashboard.
 
 ## Shipped milestones
 
@@ -60,6 +61,13 @@ this is now the living roadplan for the next work.
 - Timestamped archive files under `~/.pod_agents_config/server/audit.*.jsonl`.
 - Archive pruning controlled by `POD_SERVER_AUDIT_MAX_ARCHIVES` (default: 5).
 
+### 0.6 started: passkey management
+
+- Operator-only `GET /api/auth/passkeys` metadata listing without public keys.
+- Operator-only passkey rename and delete endpoints.
+- Dashboard passkey management dialog for renaming and removing registered
+  credentials.
+
 ### 0.5.1: agent smoke testing
 
 - Built-in sham OpenAI-compatible endpoints:
@@ -79,7 +87,6 @@ Must-have:
 - Batch dashboard page with progress, ETA, logs, stop controls, and result
   summaries.
 - Dashboard log/journal viewer for `journalctl --user -u <pod>.service`.
-- Passkey management UI for deleting and renaming local credentials.
 - HTTPS/reverse-proxy docs, including `POD_SERVER_FORCE_SECURE_COOKIE=1`.
 - Dashboard install/update card showing local version, active channel, and
   latest `main`/`dev` version.

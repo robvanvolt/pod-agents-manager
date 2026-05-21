@@ -259,6 +259,75 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 	})
 
+	mux.HandleFunc("/api/auth/passkeys", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth := currentAuthContext(r, root)
+		if auth.Role != "operator" {
+			http.Error(w, "operator role required", http.StatusUnauthorized)
+			return
+		}
+		keys, err := listPasskeys(root)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"passkeys": keys})
+	})
+
+	mux.HandleFunc("/api/auth/passkeys/rename", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "auth.passkey.rename", "")
+		if !ok {
+			return
+		}
+		id, label, err := readPasskeyManageRequest(r)
+		if err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "auth.passkey.rename", "", "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := renamePasskey(root, id, label); err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "auth.passkey.rename", id, "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		appendAudit(root, auditEntryFromRequest(r, "auth.passkey.rename", id, "ok", "", auth.Role))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	})
+
+	mux.HandleFunc("/api/auth/passkeys/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "auth.passkey.delete", "")
+		if !ok {
+			return
+		}
+		id, _, err := readPasskeyManageRequest(r)
+		if err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "auth.passkey.delete", "", "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := deletePasskey(root, id); err != nil {
+			appendAudit(root, auditEntryFromRequest(r, "auth.passkey.delete", id, "error", err.Error(), auth.Role))
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		appendAudit(root, auditEntryFromRequest(r, "auth.passkey.delete", id, "ok", "", auth.Role))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	})
+
 	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"agents":      listByExt(filepath.Join(root, "agents"), ".sh"),
@@ -1681,6 +1750,14 @@ type passkeyCredential struct {
 	Label      string   `json:"label,omitempty"`
 }
 
+type passkeySummary struct {
+	ID         string   `json:"id"`
+	Label      string   `json:"label,omitempty"`
+	CreatedAt  string   `json:"created_at"`
+	LastUsedAt string   `json:"last_used_at,omitempty"`
+	Transports []string `json:"transports,omitempty"`
+}
+
 type passkeyChallenge struct {
 	Challenge string `json:"challenge,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
@@ -2055,6 +2132,27 @@ func passkeyStatus(root string) map[string]any {
 	}
 }
 
+func listPasskeys(root string) ([]passkeySummary, error) {
+	authMutex.Lock()
+	defer authMutex.Unlock()
+
+	state, err := loadAuthState(root)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]passkeySummary, 0, len(state.Passkeys))
+	for _, key := range state.Passkeys {
+		keys = append(keys, passkeySummary{
+			ID:         key.ID,
+			Label:      key.Label,
+			CreatedAt:  key.CreatedAt,
+			LastUsedAt: key.LastUsedAt,
+			Transports: key.Transports,
+		})
+	}
+	return keys, nil
+}
+
 func passkeyRegistrationOptions(root string, r *http.Request) (map[string]any, error) {
 	authMutex.Lock()
 	defer authMutex.Unlock()
@@ -2111,6 +2209,78 @@ func passkeyRegistrationOptions(root string, r *http.Request) (map[string]any, e
 			"userVerification": "preferred",
 		},
 	}, nil
+}
+
+func readPasskeyManageRequest(r *http.Request) (string, string, error) {
+	var body struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+	}
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "application/json") {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 32*1024)).Decode(&body); err != nil {
+			return "", "", fmt.Errorf("invalid JSON body")
+		}
+	} else {
+		if err := r.ParseForm(); err != nil {
+			return "", "", fmt.Errorf("bad form data")
+		}
+		body.ID = r.FormValue("id")
+		body.Label = r.FormValue("label")
+	}
+
+	body.ID = strings.TrimSpace(body.ID)
+	body.Label = strings.TrimSpace(body.Label)
+	if body.ID == "" {
+		return "", "", fmt.Errorf("passkey id is required")
+	}
+	if len(body.Label) > 80 {
+		return "", "", fmt.Errorf("passkey label is too long")
+	}
+	return body.ID, body.Label, nil
+}
+
+func renamePasskey(root, id, label string) error {
+	authMutex.Lock()
+	defer authMutex.Unlock()
+
+	state, err := loadAuthState(root)
+	if err != nil {
+		return err
+	}
+	for i := range state.Passkeys {
+		if state.Passkeys[i].ID == id {
+			state.Passkeys[i].Label = label
+			state.UpdatedAt = time.Now().Format(time.RFC3339)
+			return saveAuthState(root, state)
+		}
+	}
+	return fmt.Errorf("passkey not found")
+}
+
+func deletePasskey(root, id string) error {
+	authMutex.Lock()
+	defer authMutex.Unlock()
+
+	state, err := loadAuthState(root)
+	if err != nil {
+		return err
+	}
+	next := state.Passkeys[:0]
+	deleted := false
+	for _, key := range state.Passkeys {
+		if key.ID == id {
+			deleted = true
+			continue
+		}
+		next = append(next, key)
+	}
+	if !deleted {
+		return fmt.Errorf("passkey not found")
+	}
+	state.Passkeys = next
+	state.UpdatedAt = time.Now().Format(time.RFC3339)
+	return saveAuthState(root, state)
 }
 
 func verifyPasskeyRegistration(root string, r *http.Request) error {

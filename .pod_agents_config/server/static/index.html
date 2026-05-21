@@ -24,6 +24,7 @@
         <span class="chip" id="chip-ip" hidden><span class="label">ip</span><code id="chip-ip-val">–</code></span>
         <span class="chip" id="chip-auth"><span class="label">role</span><code id="chip-auth-val">viewer</code></span>
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
+        <button type="button" id="passkey-manage-button" onclick="openPasskeyDialog()" hidden>Passkeys</button>
         <button type="button" id="passkey-register-button" onclick="registerPasskey()" hidden>Register Passkey</button>
         <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
@@ -48,6 +49,21 @@
       </div>
     </form>
   </dialog>
+  <dialog id="passkey-dialog" class="auth-dialog passkey-dialog">
+    <div class="auth-panel">
+      <div class="auth-head">
+        <h2>Operator Passkeys</h2>
+        <button type="button" aria-label="Close" onclick="closePasskeyDialog()">×</button>
+      </div>
+      <div id="passkey-list" class="passkey-list">
+        <p class="passkey-empty">Loading passkeys…</p>
+      </div>
+      <p id="passkey-error" class="auth-error" aria-live="polite"></p>
+      <div class="auth-actions">
+        <button type="button" onclick="closePasskeyDialog()">Close</button>
+      </div>
+    </div>
+  </dialog>
   <dialog id="terminal-dialog" class="terminal-dialog">
     <div class="terminal-panel">
       <div class="terminal-head">
@@ -65,7 +81,7 @@
     </div>
   </dialog>
 
-  <div class="card">
+  <div class="card table-card">
   <table>
     <thead>
       <tr>
@@ -102,6 +118,7 @@
   <script src="./vendor/xterm/xterm.js"></script>
   <script>
     let authState = { role: 'viewer', authenticated: false };
+    let passkeyCache = [];
     let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, term: null, rendering: false };
 
     const fmtBytes = (raw) => {
@@ -135,6 +152,7 @@
       if (c.MemUsageBytes != null) return `${fmtBytes(c.MemUsageBytes)} / ${fmtBytes(c.MemLimit)}`;
       const raw = c.MemUsage;
       if (!raw) return '-';
+      if (/^\d+$/.test(String(raw).trim())) return fmtBytes(raw);
       return String(raw);
     };
     const ioPair = (c, ins, outs, fallback) => {
@@ -148,6 +166,17 @@
       const label = safeState === 'running' ? 'running' : safeState === 'idle' ? 'idle' : safeState;
       const title = String(detail || '').replace(/"/g, '&quot;');
       return `<span class="activity-badge ${safeState}" title="${title}"><span></span>${label}</span>`;
+    };
+    const escapeHTML = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[ch]));
+    const shortID = (value) => {
+      const text = String(value || '');
+      return text.length > 14 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text;
     };
     const binocularIcon = () => `
       <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
@@ -199,6 +228,12 @@
       if (registerBtn) {
         registerBtn.hidden = !canWrite || !passkeyReady;
         registerBtn.title = passkeyReady ? 'Register this browser or device as an operator passkey' : 'Passkeys require HTTPS, localhost, and WebAuthn support';
+      }
+      const manageBtn = document.getElementById('passkey-manage-button');
+      if (manageBtn) {
+        manageBtn.hidden = !canWrite;
+        manageBtn.textContent = passkeyCount > 0 ? `Passkeys (${passkeyCount})` : 'Passkeys';
+        manageBtn.title = canWrite ? 'Manage registered operator passkeys' : 'Unlock operator mode to manage passkeys';
       }
       const passkeyLoginBtn = document.getElementById('auth-passkey-button');
       if (passkeyLoginBtn) {
@@ -324,6 +359,87 @@
       }
     }
 
+    async function openPasskeyDialog() {
+      const dialog = document.getElementById('passkey-dialog');
+      if (!dialog) return;
+      dialog.showModal();
+      await loadPasskeys();
+    }
+
+    function closePasskeyDialog() {
+      const dialog = document.getElementById('passkey-dialog');
+      if (dialog?.open) dialog.close();
+    }
+
+    async function loadPasskeys() {
+      const list = document.getElementById('passkey-list');
+      const err = document.getElementById('passkey-error');
+      if (!list) return;
+      if (err) err.textContent = '';
+      list.innerHTML = '<p class="passkey-empty">Loading passkeys…</p>';
+      try {
+        const res = await fetch('/api/auth/passkeys');
+        const text = await res.text();
+        let data; try { data = JSON.parse(text); } catch (_) { data = { error: text }; }
+        if (!res.ok) throw new Error(data.error || text || res.statusText);
+        const keys = data.passkeys || [];
+        passkeyCache = keys;
+        if (keys.length === 0) {
+          list.innerHTML = '<p class="passkey-empty">No passkeys registered yet.</p>';
+          return;
+        }
+        list.innerHTML = keys.map(key => {
+          const label = key.label || 'Unnamed passkey';
+          const created = key.created_at ? new Date(key.created_at).toLocaleString() : 'unknown';
+          const used = key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'never';
+          return `
+            <div class="passkey-row">
+              <div class="passkey-main">
+                <strong>${escapeHTML(label)}</strong>
+                <span><code>${escapeHTML(shortID(key.id))}</code> · created ${escapeHTML(created)} · last used ${escapeHTML(used)}</span>
+              </div>
+              <div class="passkey-actions">
+                <button type="button" onclick="renamePasskey('${escapeHTML(key.id)}')">Rename</button>
+                <button type="button" class="danger" onclick="deletePasskey('${escapeHTML(key.id)}')">Delete</button>
+              </div>
+            </div>`;
+        }).join('');
+      } catch (error) {
+        const msg = error?.message || 'Failed to load passkeys';
+        list.innerHTML = '<p class="passkey-empty">Could not load passkeys.</p>';
+        if (err) err.textContent = msg;
+      }
+    }
+
+    async function managePasskey(path, body, successMessage) {
+      const err = document.getElementById('passkey-error');
+      try {
+        await passkeyRequest(path, body);
+        showToast(successMessage);
+        await fetchAuthStatus();
+        await loadPasskeys();
+      } catch (error) {
+        const msg = error?.message || 'Passkey update failed';
+        if (err) err.textContent = msg;
+        showToast(msg, true);
+      }
+    }
+
+    async function renamePasskey(id) {
+      const current = passkeyCache.find(key => key.id === id);
+      const currentLabel = current?.label || '';
+      const label = prompt('Passkey label', currentLabel || '');
+      if (label == null) return;
+      await managePasskey('/api/auth/passkeys/rename', { id, label: label.trim() }, 'Passkey renamed');
+    }
+
+    async function deletePasskey(id) {
+      const current = passkeyCache.find(key => key.id === id);
+      const label = current?.label || shortID(id);
+      if (!confirm(`Delete passkey "${label || shortID(id)}"?`)) return;
+      await managePasskey('/api/auth/passkeys/delete', { id }, 'Passkey deleted');
+    }
+
     function updateClock() {
       const val = document.getElementById('chip-time-val');
       if (val) val.textContent = new Date().toLocaleTimeString();
@@ -365,16 +481,16 @@
             <button data-write-action ${canWrite ? '' : 'disabled'} class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
           </div>` : '';
         return `<tr>
-          <td><code>${id}</code></td>
-          <td><b>${name}</b></td>
-          <td>${activityBadge(c.ActivityState, c.ActivityDetail)}</td>
-          <td>${heatCell(cpu, fmtPct(c.CPU || c.CPUPerc))}</td>
-          <td>${memUsage(c)}</td>
-          <td>${heatCell(mem, fmtPct(c.MemPerc))}</td>
-          <td>${ioPair(c, ['NetInput','NetworkInput'], ['NetOutput','NetworkOutput'], 'NetIO')}</td>
-          <td>${ioPair(c, ['BlockInput'], ['BlockOutput'], 'BlockIO')}</td>
-          <td>${c.PIDS || c.Pids || c.PIDs || '-'}</td>
-          <td>${actions}</td>
+          <td data-label="ID"><code>${id}</code></td>
+          <td data-label="Name"><b>${name}</b></td>
+          <td data-label="Activity">${activityBadge(c.ActivityState, c.ActivityDetail)}</td>
+          <td data-label="CPU %">${heatCell(cpu, fmtPct(c.CPU || c.CPUPerc))}</td>
+          <td data-label="MEM Usage">${memUsage(c)}</td>
+          <td data-label="MEM %">${heatCell(mem, fmtPct(c.MemPerc))}</td>
+          <td data-label="NET I/O">${ioPair(c, ['NetInput','NetworkInput'], ['NetOutput','NetworkOutput'], 'NetIO')}</td>
+          <td data-label="BLOCK I/O">${ioPair(c, ['BlockInput'], ['BlockOutput'], 'BlockIO')}</td>
+          <td data-label="PIDS">${c.PIDS || c.Pids || c.PIDs || '-'}</td>
+          <td data-label="Actions">${actions}</td>
         </tr>`;
       }).join('');
       tbody.innerHTML = html;

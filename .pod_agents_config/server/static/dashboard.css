@@ -119,6 +119,32 @@ body {
     background: linear-gradient(135deg, var(--brand), var(--brand-2));
     color: #04111b; border-color: rgba(104,225,253,.5);
 }
+.passkey-dialog { width: min(92vw, 620px); }
+.passkey-list { display: grid; gap: .55rem; margin-top: .35rem; }
+.passkey-empty { margin: .4rem 0; color: var(--muted); font-size: .82rem; }
+.passkey-row {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    border: 1px solid rgba(148,163,184,.18);
+    border-radius: .65rem;
+    padding: .65rem;
+    background: rgba(15,23,42,.55);
+}
+.passkey-main { min-width: 0; display: grid; gap: .18rem; }
+.passkey-main strong {
+    font-size: .88rem; font-weight: 650;
+    overflow-wrap: anywhere;
+}
+.passkey-main span {
+    color: var(--muted); font-size: .72rem; line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+.passkey-actions { display: inline-flex; gap: .4rem; flex: 0 0 auto; }
+.passkey-actions button { padding: .4rem .55rem; font-size: .75rem; }
+.passkey-actions .danger {
+    border-color: rgba(248,113,113,.36);
+    color: #fecaca;
+    background: rgba(127,29,29,.2);
+}
 
 .terminal-dialog {
     position: fixed;
@@ -202,6 +228,7 @@ body {
     margin-top: 1rem; border: 1px solid var(--panel-border); border-radius: 1rem;
     background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01)), var(--panel);
     backdrop-filter: blur(16px); padding: 1rem;
+    max-width: 100%;
 }
 .card h2 { margin: 0 0 .8rem 0; font-size: 1rem; letter-spacing: -.02em; }
 
@@ -209,6 +236,7 @@ table { width: 100%; border-collapse: collapse; font-size: .83rem; }
 th, td { border: 1px solid rgba(148,163,184,.18); padding: .48rem .58rem; text-align: left; vertical-align: middle; }
 th { background: rgba(15, 23, 42, 0.82); position: sticky; top: 0; color: #c7d5ec; }
 tr:nth-child(even) { background: rgba(15, 23, 42, 0.24); }
+td { overflow-wrap: anywhere; }
 
 button {
     background: rgba(15, 23, 42, 0.9); color: #eef5ff;
@@ -294,6 +322,54 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     body { padding: .8rem; }
     .topbar { flex-direction: column; align-items: flex-start; }
     .chips { justify-content: flex-start; }
+    .table-card { padding: .75rem; overflow: hidden; }
+    .table-card table,
+    .table-card tbody,
+    .table-card tr,
+    .table-card td {
+        display: block;
+        width: 100%;
+    }
+    .table-card thead {
+        position: absolute;
+        width: 1px; height: 1px;
+        overflow: hidden; clip: rect(0 0 0 0);
+        white-space: nowrap;
+    }
+    .table-card tbody { display: grid; gap: .75rem; }
+    .table-card tr {
+        border: 1px solid rgba(148,163,184,.18);
+        border-radius: .75rem;
+        overflow: hidden;
+        background: rgba(15,23,42,.3);
+    }
+    .table-card td {
+        display: grid;
+        grid-template-columns: minmax(5.8rem, 34%) minmax(0, 1fr);
+        align-items: center;
+        gap: .6rem;
+        border-width: 0 0 1px 0;
+        padding: .55rem .65rem;
+        font-size: .76rem;
+    }
+    .table-card td:last-child { border-bottom: 0; }
+    .table-card td:not([data-label]) { display: block; }
+    .table-card td[data-label]::before {
+        content: attr(data-label);
+        color: var(--muted);
+        font-size: .68rem;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+    }
+    .table-card td[data-label="Actions"] {
+        grid-template-columns: 1fr;
+        gap: .45rem;
+    }
+    .table-card td[data-label="Actions"]::before { display: none; }
+    .table-card .inline { display: flex; width: 100%; gap: .35rem; }
+    .table-card .inline button { flex: 1 1 4.2rem; min-width: 0; }
+    .table-card .inline .icon-btn { flex: 0 0 2.2rem; width: 2.2rem; }
     th, td { font-size: .74rem; }
     .terminal-dialog { inset: 0; width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
     .terminal-screen { font-size: 11px; }
