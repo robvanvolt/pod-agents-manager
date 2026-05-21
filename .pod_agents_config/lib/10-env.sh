@@ -12,6 +12,9 @@ POD_WORKSPACES_ROOT="${POD_WORKSPACES_ROOT}"
 # Base image used for all builds. Pick one of: alpine, trixie-slim
 POD_BASE_IMAGE="${POD_BASE_IMAGE}"
 
+# Dashboard unlock key. `pod server start` generates it when left empty.
+POD_SERVER_API_KEY="${POD_SERVER_API_KEY}"
+
 # Optional — populate to enable the web skill via a Cloakbrowser/CDP service.
 POD_WEB_BROWSER="${POD_WEB_BROWSER}"
 
@@ -215,6 +218,7 @@ EOF
         : "${POD_IMAGE_CACHE_ROOT:=$HOME/.cache/podman-containers}"
         : "${POD_WORKSPACES_ROOT:=$HOME/Developer}"
         : "${POD_BASE_IMAGE:=alpine}"
+        : "${POD_SERVER_API_KEY:=}"
         : "${POD_WEB_BROWSER:=}"
         _pod_write_env_file "$pod_env_file"
     fi
@@ -230,6 +234,8 @@ EOF
     : "${POD_IMAGE_CACHE_ROOT:=${IMAGE_CACHE_ROOT:-$HOME/.cache/podman-containers}}"
     : "${POD_WORKSPACES_ROOT:=${WORKSPACES_ROOT:-$HOME/Developer}}"
     : "${POD_BASE_IMAGE:=${BASE_IMAGE:-alpine}}"
+    # Dashboard unlock key. Empty until `pod server start` generates it.
+    : "${POD_SERVER_API_KEY:=${SERVER_API_KEY:-}}"
     # Optional Cloakbrowser/CDP endpoint for the web skill.
     : "${POD_WEB_BROWSER:=${WEB_BROWSER:-}}"
     # Optional Forgejo credentials — populated only if the user runs a Forgejo

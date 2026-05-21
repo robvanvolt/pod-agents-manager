@@ -46,6 +46,7 @@ var (
 const (
 	loginRateWindow         = time.Minute
 	loginRateMaxAttempts    = 10
+	operatorSessionTTL      = 365 * 24 * time.Hour
 	defaultAuditMaxBytes    = int64(1024 * 1024)
 	defaultAuditMaxArchives = 5
 	terminalAttachScript    = `
@@ -87,6 +88,9 @@ func main() {
 	mux.Handle("/", noCache(http.FileServer(http.Dir("./static"))))
 
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
 		cacheMutex.RLock()
 		defer cacheMutex.RUnlock()
 		w.Header().Set("Content-Type", "application/json")
@@ -98,6 +102,9 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
 		hostname, _ := os.Hostname()
 		resp := map[string]any{
 			"hostname": hostname,
@@ -138,7 +145,7 @@ func main() {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		session, err := verifyBootstrapTokenAndCreateSession(root, token, r)
+		session, err := verifyDashboardTokenAndCreateSession(root, token, r)
 		if err != nil {
 			if delay := recordLoginFailure(r); delay > 0 {
 				time.Sleep(delay)
@@ -329,6 +336,9 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
 		resp := map[string]any{
 			"agents":      listByExt(filepath.Join(root, "agents"), ".sh"),
 			"flavors":     append([]string{"all"}, listByExt(filepath.Join(root, "flavors"), ".containerfile")...),
@@ -570,6 +580,9 @@ func main() {
 	mux.HandleFunc("/api/inbox", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			if !requireOperatorRead(w, r, root) {
+				return
+			}
 			agent := strings.TrimSpace(r.URL.Query().Get("agent"))
 			instance := strings.TrimSpace(r.URL.Query().Get("instance"))
 			entries, err := readInboxEntries(root, agent, instance)
@@ -2004,6 +2017,14 @@ func requireOperator(w http.ResponseWriter, r *http.Request, root, action, targe
 	return auth, false
 }
 
+func requireOperatorRead(w http.ResponseWriter, r *http.Request, root string) bool {
+	if currentAuthContext(r, root).Role == "operator" {
+		return true
+	}
+	http.Error(w, "operator role required", http.StatusUnauthorized)
+	return false
+}
+
 func requireSameOriginWrite(w http.ResponseWriter, r *http.Request, root, action, target, role string) bool {
 	if err := validateWriteOrigin(r); err != nil {
 		appendAudit(root, auditEntryFromRequest(r, action, target, "csrf_blocked", err.Error(), role))
@@ -2178,19 +2199,16 @@ func readLoginToken(r *http.Request) (string, error) {
 	return token, nil
 }
 
-func verifyBootstrapTokenAndCreateSession(root, token string, r *http.Request) (string, error) {
+func verifyDashboardTokenAndCreateSession(root, token string, r *http.Request) (string, error) {
 	authMutex.Lock()
 	defer authMutex.Unlock()
 
-	state, err := loadAuthState(root)
+	state, err := loadOrInitAuthState(root)
 	if err != nil {
 		return "", err
 	}
-	if state.BootstrapTokenSHA256 == "" {
-		return "", fmt.Errorf("bootstrap token not configured; run `pod server token rotate`")
-	}
-	if subtle.ConstantTimeCompare([]byte(state.BootstrapTokenSHA256), []byte(tokenHash(token))) != 1 {
-		return "", fmt.Errorf("invalid bootstrap token")
+	if err := verifyDashboardToken(state, token); err != nil {
+		return "", err
 	}
 	session, err := randomToken(32)
 	if err != nil {
@@ -2202,7 +2220,7 @@ func verifyBootstrapTokenAndCreateSession(root, token string, r *http.Request) (
 		TokenSHA256: tokenHash(session),
 		Role:        "operator",
 		CreatedAt:   now.Format(time.RFC3339),
-		ExpiresAt:   now.Add(24 * time.Hour).Format(time.RFC3339),
+		ExpiresAt:   now.Add(operatorSessionTTL).Format(time.RFC3339),
 		RemoteAddr:  clientIP(r),
 		UserAgent:   r.UserAgent(),
 	})
@@ -2211,6 +2229,33 @@ func verifyBootstrapTokenAndCreateSession(root, token string, r *http.Request) (
 		return "", err
 	}
 	return session, nil
+}
+
+func verifyDashboardToken(state authState, token string) error {
+	hash := tokenHash(token)
+	configured := false
+	if apiKey := strings.TrimSpace(os.Getenv("POD_SERVER_API_KEY")); apiKey != "" {
+		configured = true
+		if subtle.ConstantTimeCompare([]byte(tokenHash(apiKey)), []byte(hash)) == 1 {
+			return nil
+		}
+	}
+	if state.BootstrapTokenSHA256 != "" {
+		configured = true
+		if subtle.ConstantTimeCompare([]byte(state.BootstrapTokenSHA256), []byte(hash)) == 1 {
+			return nil
+		}
+	}
+	if !configured {
+		return fmt.Errorf("dashboard API key not configured; set POD_SERVER_API_KEY or run `pod server token rotate`")
+	}
+	return fmt.Errorf("invalid dashboard token")
+}
+
+// Legacy bootstrap-token callers share the dashboard unlock path while rotated
+// bootstrap tokens remain accepted for existing installs.
+func verifyBootstrapTokenAndCreateSession(root, token string, r *http.Request) (string, error) {
+	return verifyDashboardTokenAndCreateSession(root, token, r)
 }
 
 func revokeSession(root, session string) {
@@ -2255,6 +2300,22 @@ func loadAuthState(root string) (authState, error) {
 		return state, err
 	}
 	return state, nil
+}
+
+func loadOrInitAuthState(root string) (authState, error) {
+	state, err := loadAuthState(root)
+	if err == nil {
+		return state, nil
+	}
+	if !os.IsNotExist(err) {
+		return state, err
+	}
+	now := time.Now().Format(time.RFC3339)
+	return authState{
+		CreatedAt: now,
+		UpdatedAt: now,
+		Sessions:  []authSession{},
+	}, nil
 }
 
 func saveAuthState(root string, state authState) error {
@@ -2609,7 +2670,7 @@ func verifyPasskeyAuthenticationAndCreateSession(root string, r *http.Request) (
 		TokenSHA256: tokenHash(session),
 		Role:        "operator",
 		CreatedAt:   now.Format(time.RFC3339),
-		ExpiresAt:   now.Add(24 * time.Hour).Format(time.RFC3339),
+		ExpiresAt:   now.Add(operatorSessionTTL).Format(time.RFC3339),
 		RemoteAddr:  clientIP(r),
 		UserAgent:   r.UserAgent(),
 	})
@@ -2987,7 +3048,7 @@ func setSessionCookie(w http.ResponseWriter, r *http.Request, token string) {
 		Name:     "pod_session",
 		Value:    token,
 		Path:     "/",
-		MaxAge:   24 * 60 * 60,
+		MaxAge:   int(operatorSessionTTL.Seconds()),
 		HttpOnly: true,
 		Secure:   secureCookie(r),
 		SameSite: http.SameSiteStrictMode,

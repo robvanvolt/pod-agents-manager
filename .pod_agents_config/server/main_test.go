@@ -218,6 +218,35 @@ func TestBootstrapTokenCreatesOperatorSession(t *testing.T) {
 	}
 }
 
+func TestDashboardAPIKeyCreatesLongLivedOperatorSession(t *testing.T) {
+	t.Setenv("POD_SERVER_API_KEY", "env-dashboard-key")
+
+	root := t.TempDir()
+	req := httptest.NewRequest("POST", "/api/auth/login", nil)
+	session, err := verifyDashboardTokenAndCreateSession(root, "env-dashboard-key", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.AddCookie(&http.Cookie{Name: "pod_session", Value: session})
+	if got := currentAuthContext(req, root).Role; got != "operator" {
+		t.Fatalf("got role %q, want operator", got)
+	}
+	state, err := loadAuthState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(state.Sessions))
+	}
+	expires, err := time.Parse(time.RFC3339, state.Sessions[0].ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expires.Before(time.Now().Add(364 * 24 * time.Hour)) {
+		t.Fatalf("session expires too soon: %s", state.Sessions[0].ExpiresAt)
+	}
+}
+
 func TestLoginRejectsWrongToken(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().Format(time.RFC3339)
@@ -231,8 +260,8 @@ func TestLoginRejectsWrongToken(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("POST", "/api/auth/login", nil)
-	if _, err := verifyBootstrapTokenAndCreateSession(root, "wrong-token", req); err == nil || !strings.Contains(err.Error(), "invalid bootstrap token") {
-		t.Fatalf("got err %v, want invalid bootstrap token", err)
+	if _, err := verifyBootstrapTokenAndCreateSession(root, "wrong-token", req); err == nil || !strings.Contains(err.Error(), "invalid dashboard token") {
+		t.Fatalf("got err %v, want invalid dashboard token", err)
 	}
 	state, err := loadAuthState(root)
 	if err != nil {
@@ -410,8 +439,12 @@ func TestSessionCookieSecureFlagUsesTLSOrEnv(t *testing.T) {
 	req := httptest.NewRequest("POST", "http://127.0.0.1/api/auth/login", nil)
 	rec := httptest.NewRecorder()
 	setSessionCookie(rec, req, "session-token")
-	if rec.Result().Cookies()[0].Secure {
+	cookie := rec.Result().Cookies()[0]
+	if cookie.Secure {
 		t.Fatal("plain HTTP cookie should not be Secure by default")
+	}
+	if cookie.MaxAge != int(operatorSessionTTL.Seconds()) {
+		t.Fatalf("got MaxAge %d, want %d", cookie.MaxAge, int(operatorSessionTTL.Seconds()))
 	}
 
 	t.Setenv("POD_SERVER_FORCE_SECURE_COOKIE", "1")

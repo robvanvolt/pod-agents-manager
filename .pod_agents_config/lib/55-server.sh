@@ -103,6 +103,33 @@
             fi
         }
 
+        _pod_server_set_env_value() {
+            local _name="$1"
+            local _value="$2"
+            local _tmp="${pod_env_file}.tmp.$$"
+            awk -v name="$_name" -v value="$_value" '
+                BEGIN { found = 0 }
+                $0 ~ "^" name "=" {
+                    print name "=\"" value "\""
+                    found = 1
+                    next
+                }
+                { print }
+                END {
+                    if (!found) print name "=\"" value "\""
+                }
+            ' "$pod_env_file" > "$_tmp" || { rm -f "$_tmp"; return 1; }
+            mv "$_tmp" "$pod_env_file"
+            chmod 0600 "$pod_env_file" 2>/dev/null || true
+        }
+
+        _pod_server_ensure_api_key() {
+            [ -n "${POD_SERVER_API_KEY:-}" ] && return 0
+            POD_SERVER_API_KEY="$(_pod_server_random_token)"
+            _pod_server_set_env_value "POD_SERVER_API_KEY" "$POD_SERVER_API_KEY" || return 1
+            echo -e "\033[32mGenerated dashboard API key in $pod_env_file.\033[0m"
+        }
+
         _pod_server_token_hash() {
             local _token="$1"
             if command -v sha256sum >/dev/null 2>&1; then
@@ -191,11 +218,7 @@ EOF
 
                 _pod_server_build || return 1
 
-                if [ ! -f "$server_auth_file" ]; then
-                    echo -e "\033[33mNo dashboard operator token found; generating one now.\033[0m"
-                    _pod_server_rotate_token || return 1
-                    echo ""
-                fi
+                _pod_server_ensure_api_key || return 1
 
                 # Visual separator in the log so each run is easy to spot when tailing.
                 printf '\n=== %s — pod server start ===\n' "$(date -Iseconds 2>/dev/null || date)" >> "$server_log_file"
@@ -208,7 +231,7 @@ EOF
                 case "$-" in *m*) _prev_monitor=1 ;; esac
                 set +m
                 cd "$server_dir" || { [ "$_prev_monitor" = "1" ] && set -m; return 1; }
-                POD_SERVER_PORT="$server_port" nohup "$server_bin" >>"$server_log_file" 2>&1 </dev/null &
+                POD_SERVER_API_KEY="$POD_SERVER_API_KEY" POD_SERVER_PORT="$server_port" nohup "$server_bin" >>"$server_log_file" 2>&1 </dev/null &
                 local server_pid=$!
                 disown 2>/dev/null || true
                 cd - >/dev/null 2>&1 || true

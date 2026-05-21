@@ -38,14 +38,14 @@ Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, He
 - **Pluggable agents and composable flavors.** Drop a `<name>.sh` into `~/.pod_agents_config/agents/` and it's auto-discovered, gets its own image, gains a CLI verb. Containerfile flavors (`bun`, `uv`, …) and bases (`alpine`, `trixie-slim`) layer on automatically.
 - **Batch prompting and `tmux` grid.** `pod batch prompts.txt` fans a list of prompts across every running pod, sequentially or `--concurrent`. `pod tmux` opens a tiled grid with one pane per running pod for instant visual telemetry.
 - **Native LAN dashboard.** `pod server start` runs a static Go binary on the host (no nested containers, uses host Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, auth, terminal access, inbox, actions, and create.
-- **Operator auth without an identity provider.** Viewer mode can inspect the fleet; operator mode uses a bootstrap token, HttpOnly sessions, passkeys, same-origin write checks, rate limiting, and local audit JSONL.
+- **Operator auth without an identity provider.** The dashboard stays locked until the `.env` API key or a passkey creates a long-lived HttpOnly operator session, with same-origin write checks, rate limiting, and local audit JSONL behind it.
 - **Human-in-the-loop inbox.** `pod instruct`, `pod ask`, and the dashboard queue pending JSONL entries per pod, giving agents a shared instruction/question layer without introducing a database.
 - **Sham endpoint testing.** `pod test <agent>` and `pod test --all` exercise agent CLIs against the dashboard's built-in OpenAI/Anthropic-compatible fixture.
 - **Persistence done right.** Per-instance workspaces live at `~/Developer/<agent>-pods/<instance>/`. `remove` keeps the data; `delete` wipes it. Skills under `~/.pod_agents_config/skills/` are read-only-mounted into every pod, so updating once propagates to every agent.
 
 ## Current status
 
-The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats`, operator mode can inspect pod journals and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports bootstrap tokens and passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
 
 ## Architecture
 
@@ -249,21 +249,21 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | Route | Purpose |
 |---|---|
 | `GET /` | Single-page dashboard |
-| `GET /api/stats` | Cached `podman stats --all --no-stream` JSON, refreshed every 3s |
-| `GET /api/info` | Hostname, LAN IPs, server time |
+| `GET /api/stats` | Operator-only cached `podman stats --all --no-stream` JSON, refreshed every 3s |
+| `GET /api/info` | Operator-only hostname, LAN IPs, server time |
 | `GET /api/auth/status` | Current dashboard role and passkey readiness |
-| `POST /api/auth/login` | Unlock operator mode with the local bootstrap token |
+| `POST /api/auth/login` | Unlock the dashboard with the local API key or a rotated bootstrap token |
 | `POST /api/auth/logout` | End the operator session |
 | `POST /api/auth/passkey/register/options` | Operator-only WebAuthn registration options |
 | `POST /api/auth/passkey/register/verify` | Operator-only WebAuthn registration verification |
 | `POST /api/auth/passkey/login/options` | WebAuthn login options for registered passkeys |
 | `POST /api/auth/passkey/login/verify` | Verify a passkey assertion and create an operator session |
-| `GET /api/agents` | Available agents, flavors, volumes, bases |
+| `GET /api/agents` | Operator-only available agents, flavors, volumes, bases |
 | `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
 | `GET /api/terminal/ws` | Operator-only WebSocket stream for live xterm terminal output and input |
 | `POST /api/terminal/start` | Start the pod's detached `bot` tmux agent session |
 | `POST /api/terminal/input` | Send input to the pod's `bot` tmux pane |
-| `GET /api/inbox` | Pending local inbox entries, optionally filtered by agent + instance |
+| `GET /api/inbox` | Operator-only pending local inbox entries, optionally filtered by agent + instance |
 | `POST /api/instruct` | Queue a follow-up instruction into `~/.pod_agents_config/inbox/` |
 | `POST /api/pods/{agent}/{instance}/instructions` | REST-shaped alias for queuing pod instructions |
 | `POST /api/action` | `start \| stop \| restart \| delete \| remove` an existing pod |
@@ -290,15 +290,10 @@ still keeping the browser terminal inside the selected pod. The browser terminal
 uses vendored `@xterm/xterm` `6.1.0-beta.216` assets; exact `6.1.0` was not
 published on npm when this was added.
 
-Dashboard writes are protected by local operator auth. Viewers can load the
-dashboard and inspect stats without a login; creating, deleting, starting,
-stopping, restarting, queuing instructions, opening the live terminal, and
-registering or managing passkeys require unlocking operator mode.
-
-```bash
-pod server token rotate   # prints a one-time operator token
-pod server restart
-```
+Dashboard reads and writes are protected by local operator auth. The frontend
+stays locked until a browser has an operator session; once unlocked, the same
+session can inspect stats, create and control pods, queue instructions, open the
+live terminal, and register or manage passkeys.
 
 Operator sessions are stored as HttpOnly cookies, token hashes, passkey
 credential public keys, challenges, and sessions live in
@@ -313,26 +308,24 @@ remains a single host binary without an external identity provider. Dashboard
 writes also reject cross-origin POSTs and token/passkey login attempts are
 rate-limited per client IP before verification.
 
-**First-time auth setup.** The dashboard starts in viewer mode: stats and pod
-lists are visible, but write actions are locked. To unlock operator mode:
-
-```bash
-pod server token rotate    # prints a one-time bootstrap token
-```
-
-Click **Unlock** in the dashboard and paste the token. The session lasts 24
-hours per browser. Once unlocked, click **Register Passkey** to add a local
-device passkey for future logins, or **Passkeys** to rename/delete registered
-credentials. Passkeys require a browser WebAuthn secure context, so use HTTPS
-or localhost. For a remote sandbox or LAN host, a quick setup path is:
+**First-time auth setup.** `pod server start` generates
+`POD_SERVER_API_KEY` in `~/.pod_agents_config/.env` when the value is empty.
+Click **Unlock** in the dashboard and paste that key once. The browser receives
+a year-long HttpOnly operator session, so later visits open directly into the
+dashboard until logout or session expiry. Once unlocked, click **Register
+Passkey** to add a local device passkey for future logins, or **Passkeys** to
+rename/delete registered credentials. Passkeys require a browser WebAuthn secure
+context, so use HTTPS or localhost. For a remote sandbox or LAN host, a quick
+setup path is:
 
 ```bash
 ssh -L 1337:127.0.0.1:1337 nuc
 # then open http://localhost:1337
 ```
 
-Lost the token? Run `pod server token rotate` again; active sessions and registered passkeys stay valid until you
-remove or rotate the auth file yourself.
+Need a fallback unlock token? `pod server token rotate` still prints a one-time
+bootstrap token for existing workflows; active sessions and registered passkeys
+stay valid until you remove or rotate the auth file yourself.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
 
@@ -407,10 +400,10 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
 - **0.4 human-in-the-loop:** local JSONL inbox files, `pod inbox`,
   `pod instruct`, `pod ask`, dashboard instruction queueing, and REST-shaped
   pod instruction endpoints.
-- **0.5 safe LAN sharing:** viewer/operator roles, bootstrap-token login,
-  passkey registration/login, HttpOnly sessions, same-origin write checks,
-  login rate limiting, conditional secure cookies, and audit JSONL for
-  dashboard writes.
+- **0.5 safe LAN sharing:** API-key-gated dashboard reads, bootstrap-token
+  fallback login, passkey registration/login, long-lived HttpOnly sessions,
+  same-origin write checks, login rate limiting, conditional secure cookies, and
+  audit JSONL for dashboard writes.
 - **0.6 started:** automatic audit log rotation and archive pruning for
   dashboard write logs, plus dashboard passkey rename/delete management.
 - **0.5.1 agent smoke tests:** built-in OpenAI/Anthropic sham endpoints,

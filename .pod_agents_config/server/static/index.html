@@ -33,10 +33,10 @@
   <dialog id="auth-dialog" class="auth-dialog">
     <form method="dialog" class="auth-panel" onsubmit="return submitAuthDialog(event)">
       <div class="auth-head">
-        <h2>Unlock Operator Mode</h2>
+        <h2>Unlock Dashboard</h2>
         <button type="button" aria-label="Close" onclick="closeAuthDialog()">×</button>
       </div>
-      <label for="auth-token">Operator token</label>
+      <label for="auth-token">Dashboard API key</label>
       <div class="auth-input-row">
         <input id="auth-token" name="token" type="password" autocomplete="current-password">
         <button type="button" id="auth-token-toggle" onclick="toggleTokenVisibility()">Show</button>
@@ -111,36 +111,38 @@
     </div>
   </dialog>
 
-  <div class="card table-card">
-  <table>
-    <thead>
-      <tr>
-        <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
-        <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Ports</th><th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="stats-body">
-      <tr><td colspan="11">Loading stats…</td></tr>
-    </tbody>
-  </table>
-  </div>
+  <div id="dashboard-content" hidden>
+    <div class="card table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
+          <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Ports</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="stats-body">
+        <tr><td colspan="11">Loading stats…</td></tr>
+      </tbody>
+    </table>
+    </div>
 
-  <div class="card">
-    <h2>Create new pod</h2>
-    <form id="create-form" onsubmit="return submitCreate(event)">
-      <div class="grid">
-        <div><label>Agent</label><select name="agent" id="f-agent" required></select></div>
-        <div><label>Instance <span style="opacity:.6">(blank = auto)</span></label><input name="instance" id="f-instance" placeholder="dev, alpha, …"></div>
-        <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
-        <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
-        <div><label>Base image</label><select name="base" id="f-base"></select></div>
-      </div>
-      <div class="actions-row">
-        <button type="submit" class="primary" id="f-submit">Start pod</button>
-        <span id="f-status" style="font-size: 12px; opacity:.8;"></span>
-      </div>
-      <pre class="out" id="f-out"></pre>
-    </form>
+    <div class="card">
+      <h2>Create new pod</h2>
+      <form id="create-form" onsubmit="return submitCreate(event)">
+        <div class="grid">
+          <div><label>Agent</label><select name="agent" id="f-agent" required></select></div>
+          <div><label>Instance <span style="opacity:.6">(blank = auto)</span></label><input name="instance" id="f-instance" placeholder="dev, alpha, …"></div>
+          <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
+          <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
+          <div><label>Base image</label><select name="base" id="f-base"></select></div>
+        </div>
+        <div class="actions-row">
+          <button type="submit" class="primary" id="f-submit">Start pod</button>
+          <span id="f-status" style="font-size: 12px; opacity:.8;"></span>
+        </div>
+        <pre class="out" id="f-out"></pre>
+      </form>
+    </div>
   </div>
   </div>
 
@@ -281,6 +283,9 @@
       const btn = document.getElementById('auth-button');
       if (btn) btn.textContent = authState.authenticated ? 'Lock' : 'Unlock';
       const canWrite = authState.role === 'operator';
+      const content = document.getElementById('dashboard-content');
+      if (content) content.hidden = !canWrite;
+      if (!canWrite) openAuthDialog();
       const passkeyReady = passkeysUsable();
       const passkeyCount = Number(authState.passkeys?.registered || 0);
       const registerBtn = document.getElementById('passkey-register-button');
@@ -325,6 +330,7 @@
       const input = document.getElementById('auth-token');
       const err = document.getElementById('auth-error');
       if (!dialog || !input) return;
+      if (dialog.open) return;
       if (err) err.textContent = '';
       input.value = '';
       dialog.showModal();
@@ -358,9 +364,9 @@
         return false;
       }
       closeAuthDialog();
-      showToast('Operator mode unlocked');
+      showToast('Dashboard unlocked');
       await fetchAuthStatus();
-      fetchStats();
+      refreshDashboardData();
       return false;
     }
 
@@ -410,9 +416,9 @@
         const credential = await window.SimpleWebAuthnBrowser.startAuthentication({ optionsJSON });
         await passkeyRequest('/api/auth/passkey/login/verify', credential);
         closeAuthDialog();
-        showToast('Operator mode unlocked with passkey');
+        showToast('Dashboard unlocked with passkey');
         await fetchAuthStatus();
-        fetchStats();
+        refreshDashboardData();
       } catch (error) {
         if (err) err.textContent = error?.message || 'Passkey rejected.';
       }
@@ -505,6 +511,7 @@
     }
 
     async function fetchStats() {
+      if (authState.role !== 'operator') return;
       try {
         const res = await fetch('/api/stats');
         const data = await res.json();
@@ -962,6 +969,7 @@
     }
 
     async function loadAgentOptions() {
+      if (authState.role !== 'operator') return;
       try {
         const res = await fetch('/api/agents');
         const data = await res.json();
@@ -1015,10 +1023,14 @@
       return false;
     }
 
-    fetchInfo();
-    fetchAuthStatus();
-    fetchStats();
-    loadAgentOptions();
+    function refreshDashboardData() {
+      if (authState.role !== 'operator') return;
+      fetchInfo();
+      fetchStats();
+      loadAgentOptions();
+    }
+
+    fetchAuthStatus().then(refreshDashboardData);
     document.getElementById('terminal-dialog')?.addEventListener('close', () => {
       closeTerminalSocket();
     });
@@ -1026,7 +1038,7 @@
       terminalState.followTail = isTerminalNearBottom(ev.currentTarget);
     });
     setInterval(fetchStats, 3000);
-    setInterval(fetchInfo, 30000);
+    setInterval(() => { if (authState.role === 'operator') fetchInfo(); }, 30000);
     setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);
   </script>
