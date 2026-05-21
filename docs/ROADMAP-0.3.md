@@ -1,98 +1,153 @@
-# Pod Agents Manager 0.3 Roadmap
+# Pod Agents Manager Roadplan
 
-0.3 should be a dashboard and orchestration maturity release: the CLI already
-does useful fleet work, so the next step is making pods easier to observe,
-interrupt, and steer from a phone or LAN browser.
+This file used to track the 0.3 dashboard-awareness release. The project has
+moved on: the `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`, so
+this is now the living roadplan for the next work.
 
-## Release goals
+## Current status
 
-- Stable `dev` channel for release candidates and daily testing.
-- Dashboard shows whether each managed pod appears idle or busy.
-- Notification-ready server architecture without requiring a daemon rewrite.
-- Safer LAN control surface before browser notifications and instructions land.
-- Stronger docs, contribution flow, and release checklist.
+- Refresh context: this update started from a clean `dev` branch tracking
+  `origin/dev`.
+- Current version source: `.pod_agents_config/version.conf`.
+- Shipped agent plugins: Claude Code, Codex, Command Code, OpenCode, Crush, Pi,
+  Hermes, and Nanocoder.
+- Current dashboard surface: stats, info, auth, passkeys, terminal overlay,
+  inbox/instruct, lifecycle actions, pod creation, and sham `/v1/*` endpoints.
+- Current CLI surface: lifecycle, build/update, `tmux`, batch, inbox, ask,
+  instruct, server auth/token helpers, doctor, and agent sham testing.
+- Current 0.6 progress: dashboard audit writes now rotate to timestamped
+  `audit.*.jsonl` archives with configurable size and retention limits.
 
-## Already shipped on `dev`
+## Shipped milestones
 
-The `dev` channel, `install-dev.sh`, CI on both branches, and the first pass of
-dashboard `ActivityState` / `ActivityDetail` enrichment are already in. What
-follows is the work still needed to cut 0.3.0.
+### 0.3: dashboard awareness
 
-## Non-goals for 0.3
+- Stable `dev` channel and `install-dev.sh`.
+- CI on `main` and `dev`.
+- Host-native Go dashboard launched by `pod server start`.
+- Activity enrichment on `GET /api/stats` through `ActivityState` and
+  `ActivityDetail`.
+- Activity heuristics that combine CPU, tmux foreground command, and recent
+  pane output so low-CPU agents waiting at prompts read as idle.
+- Basic server tests and docs for the release process.
 
-These are deliberately deferred so 0.3 stays shippable:
+### 0.4: human-in-the-loop queueing
 
-- **No passkey login yet.** Token-based write protection is enough for 0.3; passkeys land in 0.5 (see `README.md` roadmap).
-- **No CLI inbox commands yet.** The `POST /api/pods/.../instructions` endpoint goes in, but `pod inbox` / `pod ask` / `pod instruct` are 0.4 work.
-- **No notification delivery.** 0.3 only stores subscriptions and exposes the question/instruction APIs. Web Push delivery rules ("pod became idle", "batch completed") are 0.4.
-- **No Docker backend, no scheduling, no remote control plane.** See the README "Non-goals" section.
+- Local per-pod JSONL inbox under
+  `~/.pod_agents_config/inbox/<agent>-<instance>.jsonl`.
+- CLI commands: `pod inbox`, `pod instruct`, and `pod ask`.
+- Dashboard instruction queueing.
+- REST-shaped instruction endpoint:
+  `POST /api/pods/{agent}/{instance}/instructions`.
+- Shared queue model that does not require a database or always-on worker.
 
-## Must-have for 0.3.0
+### 0.5: safe LAN sharing
 
-- Add token-based write protection for `POST /api/action` and `POST /api/create`.
-- Add a read-only `GET /api/pods` endpoint that normalizes pod name, agent,
-  instance, service state, container state, image, ports, workspace path,
-  activity state, and last refresh time.
-- Add an activity probe contract:
-  - `idle`: pod is running, but the agent tmux pane is at a shell or no active
-    bot session exists.
-  - `running`: pod has meaningful CPU activity or a non-shell foreground
-    command in the agent tmux pane.
-  - `unknown`: the dashboard cannot probe the pod quickly.
-- Add dashboard filtering by agent, instance, status, and activity.
-- Add a server-side event stream, `GET /api/events`, for dashboard updates.
-- Add basic server tests for identifier validation, activity normalization, and
-  read-only API JSON shape.
-- Test the release candidate only on the disposable `ssh nuc` host.
+- Viewer/operator roles for the dashboard.
+- Bootstrap-token login through `pod server token rotate`.
+- HttpOnly operator sessions.
+- Local passkey registration and login using vendored
+  `@simplewebauthn/browser` assets and native Go ES256 verification.
+- Same-origin protection for dashboard writes.
+- Rate limiting for token and passkey login attempts.
+- Conditional secure cookies for TLS or `POD_SERVER_FORCE_SECURE_COOKIE=1`.
+- Local audit log at `~/.pod_agents_config/server/audit.jsonl`.
 
-## Notification foundation
+### 0.6 started: audit retention
 
-Use a feature branch for this work, for example `feature/pwa-notifications`.
-The first notification-capable API can stay local-file backed:
+- Automatic audit rotation when `audit.jsonl` reaches
+  `POD_SERVER_AUDIT_MAX_BYTES` (default: 1 MiB).
+- Timestamped archive files under `~/.pod_agents_config/server/audit.*.jsonl`.
+- Archive pruning controlled by `POD_SERVER_AUDIT_MAX_ARCHIVES` (default: 5).
 
-- `POST /api/notifications/subscribe`
-  - Stores a browser Web Push subscription under
-    `~/.pod_agents_config/server/subscriptions.json`.
-- `POST /api/notifications/test`
-  - Sends a test notification to enabled browsers.
-- `POST /api/questions`
-  - Creates a multiple-choice question with title, body, options, target pod,
-    and optional timeout.
-- `GET /api/questions/pending`
-  - Returns unanswered questions for the dashboard/PWA.
-- `POST /api/questions/{id}/answer`
-  - Stores the selected answer and, when appropriate, queues an instruction for
-    a pod.
-- `POST /api/pods/{agent}/{instance}/instructions`
-  - Queues a new instruction for an idle pod.
+### 0.5.1: agent smoke testing
 
-The instruction queue can start as JSONL files under
-`~/.pod_agents_config/inbox/<agent>-<instance>.jsonl`. The CLI can later grow
-`pod inbox`, `pod ask`, and `pod instruct` commands that use the same files.
+- Built-in sham OpenAI-compatible endpoints:
+  `GET /v1/models`, `POST /v1/chat/completions`, and `POST /v1/completions`.
+- Built-in sham Anthropic-compatible endpoint: `POST /v1/messages`.
+- `pod test <agent>` and `pod test --all`.
+- Dedicated `<agent>-shamtest` pods for fixture-backed CLI smoke tests.
+- Agent invocation fixes for the current plugin set.
 
-## Nice-to-have
+## Next: 0.6 polish and demoability
 
-- Passkey-native dashboard login in the 0.5 line, using
-  `@simplewebauthn/browser` in the dashboard/PWA and
-  `@simplewebauthn/server` for registration/authentication verification, with
-  credentials stored locally under `~/.pod_agents_config/server/` and no
-  external identity provider required.
-- `pod server token rotate` as a recovery/bootstrap path for headless hosts and
-  first-time passkey setup.
-- `pod status --json` so the Go dashboard does not need to infer everything
-  from Podman output.
-- Batch dashboard page with progress, logs, ETA, and stop controls.
-- Per-pod notes/tags stored beside each workspace.
-- Dashboard install/update card showing local version versus latest main/dev.
-- Release notes generated from commits since the last version tag.
+0.6 should make the shipped core easier to demo, operate, and trust from a
+phone or LAN browser.
 
-## Release checklist
+Must-have:
 
-- Merge feature branches into `dev`.
-- Run `bash tests/run.sh`.
-- Install the dev channel on `ssh nuc`.
-- On `ssh nuc`, verify `pod doctor`, `pod server start`, pod creation, start,
-  stop, restart, delete, and dashboard activity states.
-- Update README, GitHub Pages, and this roadmap.
-- Bump `.pod_agents_config/version.conf` to `0.3.0`.
-- Merge `dev` to `main`.
+- Batch dashboard page with progress, ETA, logs, stop controls, and result
+  summaries.
+- Dashboard log/journal viewer for `journalctl --user -u <pod>.service`.
+- Passkey management UI for deleting and renaming local credentials.
+- HTTPS/reverse-proxy docs, including `POD_SERVER_FORCE_SECURE_COOKIE=1`.
+- Dashboard install/update card showing local version, active channel, and
+  latest `main`/`dev` version.
+- Release checklist that includes README, GitHub Pages, roadplan, shell tests,
+  Go tests, and a disposable Linux host verification pass.
+
+Nice-to-have:
+
+- Pod templates for common workflows such as web-app coding, repo triage,
+  research, and batch refactors.
+- Mobile-first PWA shell: install prompt, offline app shell, quick actions, and
+  notification center layout.
+- Notification foundation: browser subscription storage, test notification
+  delivery, and local rule definitions for "pod became idle", "batch completed",
+  "agent asks a question", and "pod failed".
+- Per-pod notes, tags, and favorite workspaces stored beside each workspace.
+- Per-pod resource limits surfaced through the CLI and dashboard create form.
+
+## 0.7 benchmark suite and agent comparison
+
+0.7 should turn the pluggable-agent story into reproducible comparisons.
+
+- Pluggable benchmark tasks under `~/.pod_agents_config/benchmarks/<name>/`.
+- Canonical starter task: "write a single-file portfolio app in one HTML file."
+- Configurable judge LLM through `POD_BENCH_JUDGE_MODEL` and
+  `POD_BENCH_JUDGE_BASE_URL`.
+- `pod bench run <task>` fan-out using existing batch infrastructure.
+- Metrics: wall-clock time, cached/new input tokens, output tokens, judge score,
+  and judge rationale.
+- CLI: `pod bench list`, `pod bench run <task> [agent]`,
+  `pod bench results <task>`, and `pod bench export <task>`.
+- Dashboard comparison table sortable by score, time, and token use.
+- Results stored under `~/.pod_agents_config/benchmarks/<task>/runs/<id>/`.
+
+## 1.0 stable public release
+
+1.0 is consolidation. The project should not reach it by adding a large new
+subsystem at the last minute.
+
+- Stable CLI surface:
+  `pod <action> [agent] [instance] [flavor] [volumes] [base]`.
+- Stable plugin contract around `agent_build_containerfile`,
+  `agent_generate_config`, and `AGENT_*` env vars.
+- Stable on-disk layout under `~/.pod_agents_config/` and
+  `~/Developer/<agent>-pods/<instance>/`.
+- JSON output for external tooling: at minimum `pod status --json` and
+  `pod doctor --json`.
+- Redacted diagnostics bundle through `pod doctor --bundle`.
+- Documented upgrade path from any 0.x release to 1.0.
+- Demo assets: dashboard GIF, `tmux` grid GIF, batch-run GIF, sample prompts,
+  and a reproducible Friday-refactor showcase.
+- Public benchmark scorecard from 0.7 covering at least three agents on the
+  canonical task.
+
+## Post-1.0
+
+- Inter-pod messaging through structured inbox entries.
+- Metrics history for activity, CPU, memory, and state changes over time.
+- Plugin registry conventions for community agents, flavors, volume bundles,
+  and skills.
+- Compatibility matrix for llama.cpp, vLLM, LM Studio, Ollama, and other
+  OpenAI-compatible local servers.
+- Release tooling improvements: changelog generation, preflight checks, and
+  rollback hints.
+
+## Non-goals
+
+- No Docker backend. Rootless Podman plus Quadlet is the identity of the
+  project.
+- No built-in scheduler. Cron, systemd timers, and `at` already exist.
+- No remote control plane. This is a single-host fleet manager.

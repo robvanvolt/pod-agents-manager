@@ -17,9 +17,9 @@
 
 ---
 
-Running half a dozen local coding agents in parallel — Claude Code in one window, OpenCode in another, a Crush instance churning through a refactor — usually means six terminals, six workspaces stomping each other, and no idea which one is actually doing work. `pod` turns any Linux box with rootless Podman into a multi-tenant home for those agents: each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, or torn down with one command.
+Running half a dozen local coding agents in parallel — Claude Code in one window, OpenCode in another, a Crush instance churning through a refactor — usually means six terminals, six workspaces stomping each other, and no idea which one is actually doing work. `pod` turns any Linux box with rootless Podman into a multi-tenant home for those agents: each instance lives in its own isolated container with a persistent workspace, talks to your local OpenAI-compatible inference server, and is started, joined, mirrored across `tmux`, batch-prompted, tested against a sham endpoint, steered from a browser, or torn down with one command.
 
-Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, and Nanocoder. A small Go-backed web dashboard exposes the same control surface over the LAN.
+Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, Hermes, and Nanocoder. A small Go-backed web dashboard exposes the same control surface over the LAN.
 
 <div align="center">
   <img src="static/screenshots/dashboard.png" alt="Pod Agents Manager dashboard" width="720" />
@@ -37,8 +37,15 @@ Ships with plugins for Claude Code, OpenCode, Crush, Pi, Hermes, and Nanocoder. 
 - **Single-file CLI, no daemons.** One `~/.pod_agents` Bash function loads numbered helper modules from `~/.pod_agents_config/lib/*.sh`. Quadlet generates the systemd units, Podman runs them rootless under your user.
 - **Pluggable agents and composable flavors.** Drop a `<name>.sh` into `~/.pod_agents_config/agents/` and it's auto-discovered, gets its own image, gains a CLI verb. Containerfile flavors (`bun`, `uv`, …) and bases (`alpine`, `trixie-slim`) layer on automatically.
 - **Batch prompting and `tmux` grid.** `pod batch prompts.txt` fans a list of prompts across every running pod, sequentially or `--concurrent`. `pod tmux` opens a tiled grid with one pane per running pod for instant visual telemetry.
-- **Native LAN dashboard.** `pod server start` runs a static Go binary on the host (no nested containers, uses host Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, info, action, and create.
+- **Native LAN dashboard.** `pod server start` runs a static Go binary on the host (no nested containers, uses host Podman directly). Bound on `0.0.0.0`, prints every reachable IP, exposes JSON APIs for stats, auth, terminal access, inbox, actions, and create.
+- **Operator auth without an identity provider.** Viewer mode can inspect the fleet; operator mode uses a bootstrap token, HttpOnly sessions, passkeys, same-origin write checks, rate limiting, and local audit JSONL.
+- **Human-in-the-loop inbox.** `pod instruct`, `pod ask`, and the dashboard queue pending JSONL entries per pod, giving agents a shared instruction/question layer without introducing a database.
+- **Sham endpoint testing.** `pod test <agent>` and `pod test --all` exercise agent CLIs against the dashboard's built-in OpenAI/Anthropic-compatible fixture.
 - **Persistence done right.** Per-instance workspaces live at `~/Developer/<agent>-pods/<instance>/`. `remove` keeps the data; `delete` wipes it. Skills under `~/.pod_agents_config/skills/` are read-only-mounted into every pod, so updating once propagates to every agent.
+
+## Current status
+
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states are visible through `/api/stats`, CLI/dashboard inbox queueing is available, operator auth supports bootstrap tokens and passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
 
 ## Architecture
 
@@ -185,6 +192,7 @@ Inbox          pod inbox [agent instance] [--json|--clear]
                pod ask <agent> <instance> "Question?" --option A --option B
 Dashboard      pod server start | stop | restart | status | logs | build
                pod server token rotate
+Testing        pod test <agent> | test --all
 Diagnostics    pod doctor
 Defaults       pod base <alpine|trixie-slim|...>
 ```
@@ -193,6 +201,9 @@ Every action accepts the same positional contract:
 
 ```
 pod <action> [agent] [instance] [flavor] [volumes] [base]
+             [--model NAME] [--endpoint URL] [--api-key KEY]
+             [--workspace NAME_OR_PATH] [--ports HOST:CONTAINER[,...]]
+             [--no-cache | --cached]
 ```
 
 Anything past `<action>` is optional; the interactive menu prompts for what's missing.
@@ -257,6 +268,10 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `POST /api/pods/{agent}/{instance}/instructions` | REST-shaped alias for queuing pod instructions |
 | `POST /api/action` | `start \| stop \| restart \| delete \| remove` an existing pod |
 | `POST /api/create` | Create a brand-new pod from agent + instance + flavor + volumes + base |
+| `GET /v1/models` | Built-in OpenAI-compatible sham model list for `pod test` |
+| `POST /v1/chat/completions` | Built-in OpenAI-compatible sham chat endpoint |
+| `POST /v1/completions` | Built-in OpenAI-compatible sham text completion endpoint |
+| `POST /v1/messages` | Built-in Anthropic-compatible sham messages endpoint |
 
 `GET /api/stats` also adds `ActivityState` and `ActivityDetail` to managed pods
 so the dashboard can show whether an agent looks idle or busy. The first-pass
@@ -288,7 +303,10 @@ pod server restart
 Operator sessions are stored as HttpOnly cookies, token hashes, passkey
 credential public keys, challenges, and sessions live in
 `~/.pod_agents_config/server/auth.json`, and write attempts are appended to
-`~/.pod_agents_config/server/audit.jsonl`. The dashboard vendors
+`~/.pod_agents_config/server/audit.jsonl`. The audit log rotates automatically
+to timestamped `audit.*.jsonl` archives when it reaches 1 MiB, keeping the five
+newest archives by default; tune this with `POD_SERVER_AUDIT_MAX_BYTES` and
+`POD_SERVER_AUDIT_MAX_ARCHIVES`. The dashboard vendors
 `@simplewebauthn/browser` `13.3.0` for browser ceremonies and verifies ES256
 WebAuthn registrations/assertions in the native Go server so the dashboard
 remains a single host binary without an external identity provider. Dashboard
@@ -313,8 +331,7 @@ ssh -L 1337:127.0.0.1:1337 nuc
 # then open http://localhost:1337
 ```
 
-Lost the token? Run `pod server token
-rotate` again; active sessions and registered passkeys stay valid until you
+Lost the token? Run `pod server token rotate` again; active sessions and registered passkeys stay valid until you
 remove or rotate the auth file yourself.
 
 All identifiers are validated, ops are whitelisted, ANSI escapes are stripped on the way out. `start` prints every reachable LAN URL so you can hand the link to a teammate.
@@ -337,7 +354,7 @@ State lives at `~/.pod_agents_config/batch/<id>/` (input copy, meta, runners, pi
 
 ## Agent inbox
 
-0.4 introduces a small local inbox per pod. Entries are JSONL files under
+The current human-in-the-loop layer is a small local inbox per pod. Entries are JSONL files under
 `~/.pod_agents_config/inbox/<agent>-<instance>.jsonl`, so the CLI, dashboard,
 and future notification workers share one queue without a database.
 
@@ -351,51 +368,54 @@ pod inbox pi dev --clear
 
 The dashboard can queue an instruction for an idle pod from the Actions column.
 This is intentionally just the queueing layer: agents do not automatically
-consume inbox entries yet, which keeps 0.4 safe while the notification and
+consume inbox entries yet, which keeps the workflow safe while notification and
 human-in-the-loop workflow matures.
+
+## Agent testing
+
+`pod test` smoke-tests agent plugins against the dashboard's built-in sham
+OpenAI/Anthropic endpoint. Start the dashboard first, then run one agent or the
+whole configured set:
+
+```bash
+pod server start
+pod test pi
+pod test --all
+pod test --all --teardown
+```
+
+Each test uses a dedicated `<agent>-shamtest` pod, points the agent config at
+`http://host.containers.internal:<port>/v1`, and expects the fixture response
+`This request succeeded`. Use `--no-setup` to test only already-running
+shamtest pods or `--endpoint URL` to point at another compatible fixture.
 
 ## Roadmap
 
 Pod Agents Manager is moving toward a small, reliable orchestration layer for
 local agent fleets: still shell-native, still rootless-first, but much better at
 showing what agents are doing and letting you steer them from the dashboard.
-The arc through 1.0 is dashboard awareness (0.3, shipped) →
-human-in-the-loop (0.4) → safe sharing (0.5) → polish & demoability (0.6) →
-benchmark suite (0.7) → public 1.0.
+The arc through 1.0 is dashboard awareness (0.3, shipped) -> human-in-the-loop
+queueing (0.4, shipped) -> safe LAN sharing and agent smoke tests (0.5.x,
+current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
+1.0.
 
-### 0.3 — dashboard awareness and notification foundations
+### Shipped: 0.3 through 0.5.1
 
-- Show whether each pod appears **idle**, **running**, or **unknown** in the LAN dashboard.
-- Add a normalized pod API with agent, instance, image, ports, workspace path, service state, container state, activity state, and last refresh time.
-- Add a server-sent events stream so the dashboard can update without constant polling.
-- Add basic write protection for dashboard actions before expanding the API surface.
-- Prepare PWA notification support: browser subscription storage, test notifications, and a notification-ready event model.
-- Add the first question/instruction APIs:
-  - ask a multiple-choice question such as “Should the app be red or blue?”
-  - collect the answer from a notification-enabled dashboard/PWA
-  - queue new instructions for an idle pod
-- Test release candidates through the `dev` channel on a disposable Linux host before promoting to `main`.
-
-### 0.4 — agent inbox and human-in-the-loop workflows
-
-- Add an instruction inbox per pod, backed by simple local files first.
-- Add CLI commands such as `pod inbox`, `pod ask`, and `pod instruct`.
-- Let the dashboard send follow-up instructions to idle pods.
-- Add notification rules for “pod became idle”, “batch completed”, “agent asks a question”, and “pod failed”.
-- Add a batch dashboard with progress, ETA, logs, stop controls, and result summaries.
-- Support per-pod notes, tags, and favorite workspaces.
-
-### 0.5 — auth and safe LAN sharing
-
-- Ship passkey-native dashboard login:
-  - `@simplewebauthn/browser` `13.3.0` in the dashboard/PWA
-  - native Go WebAuthn-compatible verification for ES256 registration and authentication assertions
-  - local credential storage under `~/.pod_agents_config/server/`
-  - no external identity provider required
-- Keep `pod server token rotate` as a recovery/bootstrap path for headless hosts and first-time passkey setup.
-- Add read-only and operator roles so a viewer link can be shared without granting `delete`/`create`.
-- Add an audit log for every mutating dashboard action: who, when, which pod, what changed.
-- Next hardening pass: passkey deletion/renaming UI, HTTPS helper docs, optional `@simplewebauthn/server` compatibility notes if the dashboard ever gains a Node sidecar.
+- **0.3 dashboard awareness:** dashboard activity states, the `dev` channel,
+  install-dev flow, CI on `main` and `dev`, and the first host-native Go server
+  hardening.
+- **0.4 human-in-the-loop:** local JSONL inbox files, `pod inbox`,
+  `pod instruct`, `pod ask`, dashboard instruction queueing, and REST-shaped
+  pod instruction endpoints.
+- **0.5 safe LAN sharing:** viewer/operator roles, bootstrap-token login,
+  passkey registration/login, HttpOnly sessions, same-origin write checks,
+  login rate limiting, conditional secure cookies, and audit JSONL for
+  dashboard writes.
+- **0.6 started:** automatic audit log rotation and archive pruning for
+  dashboard write logs.
+- **0.5.1 agent smoke tests:** built-in OpenAI/Anthropic sham endpoints,
+  `pod test <agent>`, `pod test --all`, and agent invocation fixes for the
+  current plugin set.
 
 ### 0.6 — polish and demoability
 
@@ -403,8 +423,13 @@ Everything that turns the working fleet manager into a product you can demo
 cold to a stranger.
 
 - **Pod templates** for common workflows: web-app coding, repo triage, research, batch refactors. `pod start --from-template <name>`.
-- **Mobile-first PWA polish:** install prompt, offline shell, notification center, quick actions.
+- **Mobile-first PWA polish:** install prompt, offline shell, notification center, and quick actions.
+- **Notification foundation:** browser subscription storage, local delivery tests, and rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
+- **Batch dashboard page:** progress, ETA, logs, stop controls, and result summaries.
 - **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
+- **Auth management polish:** passkey deletion/renaming UI, HTTPS helper docs, and clearer recovery docs for headless hosts.
+- **Dashboard install/update card:** local version, channel, and latest `main`/`dev` version status.
+- **Per-pod notes, tags, and favorite workspaces** stored beside each workspace.
 - **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.
 
 ### 0.7 — benchmark suite and agent comparison
@@ -461,7 +486,7 @@ Deferred deliberately so 1.0 freezes a coherent surface:
 Source layout:
 
 - `.pod_agents` — entrypoint that defines the `pod` function and sources the modules in numeric order.
-- `.pod_agents_config/lib/NN-*.sh` — numbered helper modules (env, build/pick, help/sync, early-flags, interactive menu, arg-parse, doctor, server, batch, lifecycle).
+- `.pod_agents_config/lib/NN-*.sh` — numbered helper modules (env, build/pick, help/sync, early-flags, interactive menu, arg-parse, doctor, server, batch, inbox, sham testing, lifecycle).
 - `.pod_agents_config/agents/`, `flavors/`, `volumes/`, `skills/`, `server/` — pluggable extension points.
 - `tests/run.sh` — single-file lint + sham-test runner.
 - `.github/workflows/tests.yml` — runs the suite on every push and PR.
@@ -472,15 +497,15 @@ Run the suite locally (no Podman or systemd needed — the tests sandbox a fake 
 bash tests/run.sh
 ```
 
-The suite covers `bash -n` syntax, `shellcheck` errors, the lib loader contract (numeric prefixes + sentinel exit codes), install/self-update regression guards, sandboxed smoke tests for `--help` / `--version` / `doctor`, helper-function unit tests, and a regression check that `pod --version` matches `version.conf`.
+The suite covers `bash -n` syntax, `shellcheck` errors, the lib loader contract (numeric prefixes + sentinel exit codes), install/self-update regression guards, sandboxed smoke tests for `--help` / `--version` / `doctor`, helper-function unit tests, and a regression check that `pod --version` matches `version.conf`. CI also runs the Go server tests for auth, audit, activity parsing, terminal helpers, inbox storage, and the sham endpoint.
 
-The proposed 0.3 plan lives in [docs/ROADMAP-0.3.md](docs/ROADMAP-0.3.md).
+The current roadplan lives in [docs/ROADMAP-0.3.md](docs/ROADMAP-0.3.md).
 
-**Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (e.g. `0.2.2n` → `0.2.2o`), committing, and pushing is the entire release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
+**Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (for example, `0.5.1` to `0.5.2`), committing, and pushing is the release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
 
 **Branching.** Keep `main` as the stable install channel, use `dev` for small
 release-prep changes, and open named feature branches for larger work such as
-PWA notifications or new orchestration APIs. Merge large branches into `dev`
+PWA notifications, dashboard polish, or benchmark APIs. Merge large branches into `dev`
 first, test on a disposable Linux host, then fast-forward or PR `dev` into
 `main` for release.
 

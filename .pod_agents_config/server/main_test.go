@@ -262,6 +262,42 @@ func TestRequireOperatorWritesAuditEntryOnDeny(t *testing.T) {
 	}
 }
 
+func TestAppendAuditRotatesAndPrunesArchives(t *testing.T) {
+	t.Setenv("POD_SERVER_AUDIT_MAX_BYTES", "1")
+	t.Setenv("POD_SERVER_AUDIT_MAX_ARCHIVES", "2")
+
+	root := t.TempDir()
+	req := httptest.NewRequest("POST", "/api/action", nil)
+	for i := 0; i < 4; i++ {
+		appendAudit(root, auditEntryFromRequest(req, "action.start", "pi-dev", "ok", "", "operator"))
+	}
+
+	current, err := os.ReadFile(auditFile(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(current), `"action":"action.start"`) {
+		t.Fatalf("current audit file missing latest entry: %s", string(current))
+	}
+
+	archives, err := filepath.Glob(auditArchivePattern(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(archives) != 2 {
+		t.Fatalf("got %d archives, want 2: %#v", len(archives), archives)
+	}
+	for _, archive := range archives {
+		info, err := os.Stat(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Size() == 0 {
+			t.Fatalf("archive is empty: %s", archive)
+		}
+	}
+}
+
 func TestRequireOperatorBlocksCrossSiteOrigin(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()

@@ -36,6 +36,7 @@ var (
 	statsCache           []byte
 	cacheMutex           sync.RWMutex
 	authMutex            sync.Mutex
+	auditMutex           sync.Mutex
 	loginRateMutex       sync.Mutex
 	loginRateAttempts    = map[string]*loginRateState{}
 	activityBusyCPUPct   = 1.0
@@ -43,9 +44,11 @@ var (
 )
 
 const (
-	loginRateWindow      = time.Minute
-	loginRateMaxAttempts = 10
-	terminalAttachScript = `
+	loginRateWindow         = time.Minute
+	loginRateMaxAttempts    = 10
+	defaultAuditMaxBytes    = int64(1024 * 1024)
+	defaultAuditMaxArchives = 5
+	terminalAttachScript    = `
 if [ "$POD_TERMINAL_COLS" -gt 0 ] 2>/dev/null && [ "$POD_TERMINAL_ROWS" -gt 0 ] 2>/dev/null; then
 	stty cols "$POD_TERMINAL_COLS" rows "$POD_TERMINAL_ROWS" 2>/dev/null || true
 fi
@@ -1729,6 +1732,10 @@ func authFile(root string) string { return filepath.Join(root, "server", "auth.j
 
 func auditFile(root string) string { return filepath.Join(root, "server", "audit.jsonl") }
 
+func auditArchivePattern(root string) string {
+	return filepath.Join(root, "server", "audit.*.jsonl")
+}
+
 func currentAuthContext(r *http.Request, root string) authContext {
 	role := "viewer"
 	session := sessionTokenFromRequest(r)
@@ -2681,10 +2688,16 @@ func secureCookie(r *http.Request) bool {
 }
 
 func appendAudit(root string, entry auditEntry) {
+	auditMutex.Lock()
+	defer auditMutex.Unlock()
+
 	path := auditFile(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		log.Printf("audit mkdir failed: %v", err)
 		return
+	}
+	if err := rotateAuditIfNeeded(root); err != nil {
+		log.Printf("audit rotate failed: %v", err)
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -2700,6 +2713,76 @@ func appendAudit(root string, entry auditEntry) {
 	if _, err := f.Write(append(data, '\n')); err != nil {
 		log.Printf("audit write failed: %v", err)
 	}
+}
+
+func rotateAuditIfNeeded(root string) error {
+	maxBytes := auditMaxBytes()
+	if maxBytes <= 0 {
+		return nil
+	}
+
+	path := auditFile(root)
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.Size() < maxBytes {
+		return nil
+	}
+
+	archivePath := filepath.Join(filepath.Dir(path), fmt.Sprintf("audit.%s.jsonl", time.Now().UTC().Format("20060102-150405.000000000")))
+	if err := os.Rename(path, archivePath); err != nil {
+		return err
+	}
+	_ = os.Chmod(archivePath, 0o600)
+	return pruneAuditArchives(root)
+}
+
+func pruneAuditArchives(root string) error {
+	maxArchives := auditMaxArchives()
+	if maxArchives < 0 {
+		return nil
+	}
+
+	archives, err := filepath.Glob(auditArchivePattern(root))
+	if err != nil {
+		return err
+	}
+	sort.Strings(archives)
+	for len(archives) > maxArchives {
+		if err := os.Remove(archives[0]); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		archives = archives[1:]
+	}
+	return nil
+}
+
+func auditMaxBytes() int64 {
+	return int64Env("POD_SERVER_AUDIT_MAX_BYTES", defaultAuditMaxBytes)
+}
+
+func auditMaxArchives() int {
+	v := int64Env("POD_SERVER_AUDIT_MAX_ARCHIVES", int64(defaultAuditMaxArchives))
+	if v > int64(^uint(0)>>1) {
+		return int(^uint(0) >> 1)
+	}
+	return int(v)
+}
+
+func int64Env(name string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return value
 }
 
 func auditEntryFromRequest(r *http.Request, action, target, result, errText, role string) auditEntry {
