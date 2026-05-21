@@ -23,6 +23,8 @@ this is now the living roadplan for the next work.
   browser-reachable TCP host ports into new-tab links.
 - Operator mode can inspect bounded per-pod `journalctl --user` snapshots from
   the dashboard.
+- Idle agent terminals that are waiting for input can receive a new request
+  directly from the dashboard.
 
 ## Shipped milestones
 

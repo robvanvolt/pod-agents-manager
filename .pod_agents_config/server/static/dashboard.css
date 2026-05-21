@@ -112,6 +112,18 @@ body {
     border: 1px solid rgba(148,163,184,.25); border-radius: .55rem;
     padding: .5rem .65rem; font-size: .85rem;
 }
+.request-dialog { width: min(92vw, 640px); }
+.request-dialog textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 7rem;
+    background: rgba(15,23,42,.8);
+    color: #eef5ff;
+    border: 1px solid rgba(148,163,184,.25);
+    border-radius: .55rem;
+    padding: .65rem;
+    font: .85rem/1.35 Inter, system-ui, sans-serif;
+}
 .auth-error { min-height: 1.1rem; margin: .55rem 0 0; color: #fecaca; font-size: .78rem; }
 .auth-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .85rem; }
 #auth-passkey-button { margin-right: auto; }
