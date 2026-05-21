@@ -86,11 +86,11 @@
     <thead>
       <tr>
         <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
-        <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Actions</th>
+        <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Ports</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="stats-body">
-      <tr><td colspan="10">Loading stats…</td></tr>
+      <tr><td colspan="11">Loading stats…</td></tr>
     </tbody>
   </table>
   </div>
@@ -177,6 +177,33 @@
     const shortID = (value) => {
       const text = String(value || '');
       return text.length > 14 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text;
+    };
+    const portURLHost = (hostIP) => {
+      const binding = String(hostIP || '').trim().replace(/^\[(.*)\]$/, '$1').toLowerCase();
+      const pageHost = window.location.hostname;
+      if (!binding || binding === '0.0.0.0' || binding === '::') return pageHost;
+      if (binding === '127.0.0.1' || binding === 'localhost' || binding === '::1') {
+        const dashboardIsLocal = pageHost === '127.0.0.1' || pageHost === 'localhost' || pageHost === '::1';
+        return dashboardIsLocal ? pageHost : '';
+      }
+      return binding;
+    };
+    const bracketIPv6 = (host) => String(host || '').includes(':') ? `[${host}]` : host;
+    const publishedPorts = (ports) => {
+      if (!Array.isArray(ports) || ports.length === 0) return '-';
+      const chips = ports.map(port => {
+        const hostPort = String(port.hostPort || '').trim();
+        const containerPort = String(port.containerPort || '').trim();
+        const protocol = String(port.protocol || 'tcp').trim().toLowerCase();
+        const label = `${hostPort || '?'} -> ${containerPort || '?'}/${protocol}`;
+        const urlHost = portURLHost(port.hostIP);
+        if (protocol === 'tcp' && /^\d+$/.test(hostPort) && urlHost) {
+          const href = `http://${bracketIPv6(urlHost)}:${hostPort}/`;
+          return `<a class="port-chip open" href="${escapeHTML(href)}" target="_blank" rel="noopener" title="Open host port ${escapeHTML(hostPort)} in a new tab">${escapeHTML(label)}</a>`;
+        }
+        return `<span class="port-chip" title="Published host port">${escapeHTML(label)}</span>`;
+      }).join('');
+      return `<div class="port-links">${chips}</div>`;
     };
     const binocularIcon = () => `
       <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
@@ -458,7 +485,7 @@
     function renderTable(containers) {
       const tbody = document.getElementById('stats-body');
       if (!containers || containers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10">No containers running</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11">No containers running</td></tr>';
         return;
       }
       const html = containers.map(c => {
@@ -490,6 +517,7 @@
           <td data-label="NET I/O">${ioPair(c, ['NetInput','NetworkInput'], ['NetOutput','NetworkOutput'], 'NetIO')}</td>
           <td data-label="BLOCK I/O">${ioPair(c, ['BlockInput'], ['BlockOutput'], 'BlockIO')}</td>
           <td data-label="PIDS">${c.PIDS || c.Pids || c.PIDs || '-'}</td>
+          <td data-label="Ports">${publishedPorts(c.PublishedPorts)}</td>
           <td data-label="Actions">${actions}</td>
         </tr>`;
       }).join('');

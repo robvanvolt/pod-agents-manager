@@ -45,6 +45,35 @@ func TestFirstPercent(t *testing.T) {
 	}
 }
 
+func TestParsePublishedPorts(t *testing.T) {
+	got := parsePublishedPorts(`
+f99c7164ed6a4ae1f05aa2ad1f08a70bb8dcb883e663ab34c497a53ec4f704d8
+3000/tcp -> 0.0.0.0:3000
+5353/udp -> [::]:45353
+`)
+	ports := got["f99c7164ed6a4ae1f05aa2ad1f08a70bb8dcb883e663ab34c497a53ec4f704d8"]
+	if len(ports) != 2 {
+		t.Fatalf("got %d ports: %#v", len(ports), ports)
+	}
+	if ports[0].ContainerPort != "3000" || ports[0].Protocol != "tcp" || ports[0].HostIP != "0.0.0.0" || ports[0].HostPort != "3000" {
+		t.Fatalf("unexpected tcp port: %#v", ports[0])
+	}
+	if ports[1].ContainerPort != "5353" || ports[1].Protocol != "udp" || ports[1].HostIP != "::" || ports[1].HostPort != "45353" {
+		t.Fatalf("unexpected udp port: %#v", ports[1])
+	}
+}
+
+func TestEnrichPublishedPortsMatchesShortStatsID(t *testing.T) {
+	row := map[string]any{"ID": "f99c7164ed6a"}
+	enrichPublishedPorts(row, map[string][]publishedPort{
+		"f99c7164ed6a4ae1": {{ContainerPort: "5173", Protocol: "tcp", HostIP: "0.0.0.0", HostPort: "5173"}},
+	})
+	ports, ok := row["PublishedPorts"].([]publishedPort)
+	if !ok || len(ports) != 1 || ports[0].HostPort != "5173" {
+		t.Fatalf("unexpected published ports: %#v", row["PublishedPorts"])
+	}
+}
+
 func TestClassifyLowCPUAgentPromptAsIdle(t *testing.T) {
 	capture := `
 The square root of 20 is approximately 4.472.

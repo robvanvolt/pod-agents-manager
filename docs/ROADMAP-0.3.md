@@ -18,6 +18,8 @@ this is now the living roadplan for the next work.
 - Current 0.6 progress: dashboard audit writes now rotate to timestamped
   `audit.*.jsonl` archives with configurable size and retention limits, and
   operator passkeys can be renamed or deleted from the dashboard.
+- Dashboard stats now surface published pod port mappings and turn
+  browser-reachable TCP host ports into new-tab links.
 
 ## Shipped milestones
 

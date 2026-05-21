@@ -45,7 +45,7 @@ Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, He
 
 ## Current status
 
-The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states are visible through `/api/stats`, CLI/dashboard inbox queueing is available, operator auth supports bootstrap tokens and passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats`, CLI/dashboard inbox queueing is available, operator auth supports bootstrap tokens and passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
 
 ## Architecture
 

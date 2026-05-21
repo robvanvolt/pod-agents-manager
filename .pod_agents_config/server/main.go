@@ -890,6 +890,7 @@ func updateStatsLoop() {
 
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		containers := []map[string]any{}
+		publishedPorts := readPublishedPorts()
 		root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
 		if len(lines) > 0 && lines[0] != "" {
 			for _, line := range lines {
@@ -903,6 +904,7 @@ func updateStatsLoop() {
 					continue
 				}
 				enrichActivity(row, root)
+				enrichPublishedPorts(row, publishedPorts)
 				containers = append(containers, row)
 			}
 		}
@@ -918,6 +920,71 @@ func updateStatsLoop() {
 		cacheMutex.Unlock()
 		time.Sleep(3 * time.Second)
 	}
+}
+
+type publishedPort struct {
+	ContainerPort string `json:"containerPort"`
+	Protocol      string `json:"protocol"`
+	HostIP        string `json:"hostIP"`
+	HostPort      string `json:"hostPort"`
+}
+
+func readPublishedPorts() map[string][]publishedPort {
+	output, err := exec.Command("podman", "port", "--all").Output()
+	if err != nil {
+		log.Printf("podman port failed: %v", err)
+		return map[string][]publishedPort{}
+	}
+	return parsePublishedPorts(string(output))
+}
+
+func parsePublishedPorts(output string) map[string][]publishedPort {
+	out := map[string][]publishedPort{}
+	currentID := ""
+	for _, rawLine := range strings.Split(strings.TrimSpace(output), "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		left, right, ok := strings.Cut(line, "->")
+		if !ok {
+			currentID = line
+			continue
+		}
+		if currentID == "" {
+			continue
+		}
+		containerPort, protocol, ok := strings.Cut(strings.TrimSpace(left), "/")
+		if !ok || strings.TrimSpace(containerPort) == "" {
+			continue
+		}
+		hostIP, hostPort := splitHostPortLoose(strings.TrimSpace(right))
+		if strings.TrimSpace(hostPort) == "" {
+			continue
+		}
+		out[currentID] = append(out[currentID], publishedPort{
+			ContainerPort: strings.TrimSpace(containerPort),
+			Protocol:      strings.ToLower(strings.TrimSpace(protocol)),
+			HostIP:        strings.TrimSpace(hostIP),
+			HostPort:      strings.TrimSpace(hostPort),
+		})
+	}
+	return out
+}
+
+func enrichPublishedPorts(row map[string]any, portsByID map[string][]publishedPort) {
+	id := firstString(row, "ID", "ContainerID")
+	if id == "" {
+		row["PublishedPorts"] = []publishedPort{}
+		return
+	}
+	for portID, ports := range portsByID {
+		if portID == id || strings.HasPrefix(portID, id) || strings.HasPrefix(id, portID) {
+			row["PublishedPorts"] = ports
+			return
+		}
+	}
+	row["PublishedPorts"] = []publishedPort{}
 }
 
 func enrichActivity(row map[string]any, root string) {
