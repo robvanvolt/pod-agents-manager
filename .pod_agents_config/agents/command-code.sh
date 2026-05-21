@@ -21,10 +21,10 @@
 # If Command Code later adds a documented openai/custom-endpoint provider,
 # this plugin should be updated to write that config directly.
 
-AGENT_VOLUME_CONFIG_PATH="/root/.config/command-code"
+AGENT_VOLUME_CONFIG_PATH="/root/.commandcode"
 
-# Pi-style skills path; Command Code's actual skills layout (if any) is not
-# documented yet. Keeping the standard subpath so /srv/skills is reachable.
+# Command Code scans ~/.commandcode/skills for user skills. The lifecycle
+# module links this path to the shared read-only /srv/skills mount.
 AGENT_SKILLS_SUBPATH="skills"
 
 # Non-interactive prompt mode for `pod batch` and `pod test`.
@@ -62,7 +62,7 @@ agent_generate_config() {
     # the first time they launch.
     cat <<EOF > "$config_dir/README.txt"
 This directory is bind-mounted from the host as Command Code's config dir
-(\$AGENT_VOLUME_CONFIG_PATH=/root/.config/command-code).
+(\$AGENT_VOLUME_CONFIG_PATH=/root/.commandcode).
 
 To use a local OpenAI-compatible inference server, after \`pod join command-code <inst>\`:
   1. Run \`cmd\`
