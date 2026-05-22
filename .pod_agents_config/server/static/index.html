@@ -172,7 +172,7 @@
   <script>
     let authState = { role: 'viewer', authenticated: false };
     let passkeyCache = [];
-    let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, term: null, rendering: false };
+    let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, openTailUntil: 0, term: null, rendering: false };
     let logState = { kind: 'pod', agent: '', instance: '', batch: '', target: '' };
     let requestState = { agent: '', instance: '' };
 
@@ -625,13 +625,16 @@
       document.getElementById('terminal-meta').textContent = 'connecting terminal…';
       document.getElementById('terminal-empty').hidden = true;
       terminalState.followTail = true;
+      terminalState.openTailUntil = Date.now() + 8000;
       dialog.showModal();
       initTerminal();
       fitTerminal();
       renderTerminalOutput('Loading terminal…');
+      settleTerminalTail();
       requestAnimationFrame(() => {
         fitTerminal();
         connectTerminalSocket();
+        settleTerminalTail();
         terminalState.term?.focus();
       });
     }
@@ -922,6 +925,8 @@
       term.onData((data) => {
         const socket = terminalState.socket;
         if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        terminalState.followTail = true;
+        scrollTerminalToTail();
         socket.send(JSON.stringify({ type: 'input', data }));
       });
       window.addEventListener('resize', fitTerminal);
@@ -962,8 +967,7 @@
       term.reset();
       term.write(raw || '', () => {
         if (follow) {
-          term.scrollToBottom();
-          terminalState.followTail = true;
+          settleTerminalTail();
         } else {
           term.scrollToLine(Math.min(previousViewport, term.buffer.active.baseY));
         }
@@ -979,6 +983,7 @@
       const noSession = data.status === 'no-session';
       if (empty) empty.hidden = !noSession;
       renderTerminalOutput(data.output || '', true);
+      settleTerminalTail();
     }
 
     function writeTerminalChunk(raw) {
@@ -986,10 +991,31 @@
       fitTerminal();
       const term = terminalState.term;
       if (!term) return;
-      const follow = terminalState.followTail || isTerminalNearBottom();
+      const follow = terminalOpeningTail() || terminalState.followTail || isTerminalNearBottom();
       term.write(raw || '', () => {
-        if (follow) term.scrollToBottom();
+        if (follow) settleTerminalTail();
       });
+    }
+
+    function terminalOpeningTail() {
+      return Date.now() < terminalState.openTailUntil;
+    }
+
+    function scrollTerminalToTail() {
+      const term = terminalState.term;
+      if (!term) return;
+      term.scrollToBottom();
+      const viewport = document.querySelector('#terminal-output .xterm-viewport');
+      if (viewport) viewport.scrollTop = viewport.scrollHeight;
+      terminalState.followTail = true;
+    }
+
+    function settleTerminalTail() {
+      scrollTerminalToTail();
+      requestAnimationFrame(scrollTerminalToTail);
+      setTimeout(() => {
+        if (terminalOpeningTail()) scrollTerminalToTail();
+      }, 120);
     }
 
     function sendTerminalResize() {
@@ -1258,6 +1284,9 @@
     document.getElementById('terminal-output')?.addEventListener('scroll', ev => {
       terminalState.followTail = isTerminalNearBottom(ev.currentTarget);
     });
+    document.getElementById('terminal-output')?.addEventListener('wheel', () => {
+      terminalState.openTailUntil = 0;
+    }, { passive: true });
     setInterval(fetchStats, 3000);
     setInterval(loadBatches, 5000);
     setInterval(() => { if (authState.role === 'operator') fetchInfo(); }, 30000);
