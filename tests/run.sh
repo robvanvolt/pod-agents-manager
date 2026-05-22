@@ -137,9 +137,10 @@ setup_sandbox() {
     cp .pod_agents "$tmp/.pod_agents"
     # Mirror everything except .git artifacts
     cp -R .pod_agents_config/. "$tmp/.pod_agents_config/"
-    # Pre-seed .env from .env.example so the entrypoint doesn't try to
-    # auto-configure (which would also no-op without a tty, but be explicit).
-    cp .pod_agents_config/.env.example "$tmp/.pod_agents_config/.env"
+    # Pre-seed .env with dummy non-placeholder values so auto-configure is bypassed.
+    sed -E 's/<your-openai-base-url-with-trailing-\/v1>/http:\/\/127.0.0.1:8000\/v1/g' .pod_agents_config/.env.example | \
+        sed -E 's/<your-api-key>/sk-dummy/g' | \
+        sed -E 's/<your-default-model>/qwen/g' > "$tmp/.pod_agents_config/.env"
     printf '%s' "$tmp"
 }
 
@@ -430,6 +431,88 @@ t_api_key_hyphen_eq_form_parses() {
     out=$(run_pod_in_sandbox "$sandbox" doctor --api-key=test-key 2>&1)
     rm -rf "$sandbox"
     printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_pod_template_resolution() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+
+    # 1. Invalid template name (regex check)
+    out=$(run_pod_in_sandbox "$sandbox" start opencode dev --from-template="invalid/path" 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ] || ! printf '%s' "$out" | grep -q "Invalid template name"; then
+        echo "  expected regex error for path traversal attempt, got rc=$rc out=$out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+
+    # 2. Missing template name
+    out=$(run_pod_in_sandbox "$sandbox" start opencode dev --from-template 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ] || ! printf '%s' "$out" | grep -q "requires a value"; then
+        echo "  expected missing template value error, got rc=$rc out=$out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+
+    # 3. Non-existent template name
+    out=$(run_pod_in_sandbox "$sandbox" start opencode dev --from-template="nonexistent" 2>&1)
+    rc=$?
+    if [ "$rc" -eq 0 ] || ! printf '%s' "$out" | grep -q "Template 'nonexistent' not found"; then
+        echo "  expected template not found error, got rc=$rc out=$out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+
+    # 4. Verify template properties are correctly loaded and applied
+    out=$(HOME="$sandbox" bash --noprofile --norc -c '
+        set -u
+        tmp_entry=$(mktemp)
+        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
+        source "$tmp_entry"
+        rm -f "$tmp_entry"
+
+        podman() {
+            if [ "$1" = "image" ] && [ "$2" = "exists" ]; then
+                return 0
+            fi
+            return 0
+        }
+        systemctl() {
+            return 0
+        }
+
+        # Run start with a template
+        _pod_agents_main start opencode test-inst --from-template web-app >/dev/null
+
+        # Verify the quadlet file was written with template properties!
+        quadlet="$HOME/.config/containers/systemd/opencode@.container"
+        if [ ! -f "$quadlet" ]; then
+            echo "  quadlet file not written" >&2
+            exit 1
+        fi
+
+        if ! grep -q "Image=localhost/opencode-agent-bun-alpine:latest" "$quadlet"; then
+            echo "  quadlet missing Bun flavor: $(cat "$quadlet")" >&2
+            exit 1
+        fi
+
+        if ! grep -q "PublishPort=3000:3000" "$quadlet" || ! grep -q "PublishPort=5173:5173" "$quadlet"; then
+            echo "  quadlet missing PublishPort: $(cat "$quadlet")" >&2
+            exit 1
+        fi
+
+        exit 0
+    ' 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  template properties resolution failed: $out" >&2
+        rm -rf "$sandbox"
+        return 1
+    fi
+
+    rm -rf "$sandbox"
+    return 0
 }
 
 # When ~/.pod_agents_config/.cmd_name contains a custom name (e.g. "pods" for
@@ -804,6 +887,7 @@ run_test "api-key flag: --api-key=VAL parses"     t_api_key_hyphen_eq_form_parse
 run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
+run_test "template: start --from-template resolution" t_pod_template_resolution
 run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options
 run_test "test: no args prints usage"          t_test_no_args_prints_usage

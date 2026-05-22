@@ -19,6 +19,7 @@
     local API_KEY_OVERRIDE=""
     local WORKSPACE_DIR_OVERRIDE=""
     local PORTS_OVERRIDE=""
+    local FROM_TEMPLATE=""
     # Build-cache control. NO_CACHE_BUILD=1 forces `podman build --no-cache`
     # so layers like `RUN npm install -g <pkg>` actually re-fetch upstream
     # rather than reusing the cached layer. Set automatically by `pod update`
@@ -34,6 +35,7 @@
                 api_key) API_KEY_OVERRIDE="$_mf_arg" ;;
                 workspace) WORKSPACE_DIR_OVERRIDE="$_mf_arg" ;;
                 ports) PORTS_OVERRIDE="$_mf_arg" ;;
+                from-template) FROM_TEMPLATE="$_mf_arg" ;;
             esac
             _mf_skip=0
             _mf_expect=""
@@ -44,6 +46,7 @@
             --endpoint=*) ENDPOINT_OVERRIDE="${_mf_arg#--endpoint=}" ;;
             --workspace=*) WORKSPACE_DIR_OVERRIDE="${_mf_arg#--workspace=}" ;;
             --ports=*) PORTS_OVERRIDE="${_mf_arg#--ports=}" ;;
+            --from-template=*) FROM_TEMPLATE="${_mf_arg#--from-template=}" ;;
             # All three spellings are accepted; --api-key is the canonical one
             # shown in help text. Underscore and run-together forms are kept
             # because users naturally type them.
@@ -52,6 +55,7 @@
             --endpoint) _mf_skip=1; _mf_expect="endpoint" ;;
             --workspace) _mf_skip=1; _mf_expect="workspace" ;;
             --ports) _mf_skip=1; _mf_expect="ports" ;;
+            --from-template) _mf_skip=1; _mf_expect="from-template" ;;
             --api-key|--api_key|--apikey) _mf_skip=1; _mf_expect="api_key" ;;
             --no-cache) NO_CACHE_BUILD=1 ;;
             --cached)   CACHED_BUILD=1 ;;
@@ -72,12 +76,24 @@
             ports)
                 echo -e "\033[31m--ports requires a value (e.g. --ports 3000:3000 or --ports=3000:3000,8080:8080).\033[0m" >&2
                 ;;
+            from-template)
+                echo -e "\033[31m--from-template requires a value (e.g. --from-template web-app or --from-template=web-app).\033[0m" >&2
+                ;;
             api_key)
                 echo -e "\033[31m--api-key requires a value (e.g. --api-key sk-... or --api-key=sk-...).\033[0m" >&2
                 ;;
         esac
         return 1
     fi
+
+    if [ -n "$FROM_TEMPLATE" ]; then
+        if ! [[ "$FROM_TEMPLATE" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo -e "\033[31mError: Invalid template name '${FROM_TEMPLATE}'. Must contain only letters, numbers, hyphens, and underscores.\033[0m" >&2
+            return 1
+        fi
+    fi
+
     set -- "${_mf_args[@]}"
+
 
     return 99  # sentinel: fell off end, continue to next lib

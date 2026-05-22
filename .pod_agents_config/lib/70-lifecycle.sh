@@ -172,6 +172,46 @@
         source "$config_dir_agents/${agent}.sh"
     fi
 
+    if [[ "$action" =~ ^(start|restart)$ ]] && [ -n "${FROM_TEMPLATE:-}" ]; then
+        local template_path="$config_dir_templates/${FROM_TEMPLATE}.conf"
+        if [ ! -f "$template_path" ]; then
+            echo -e "\033[31mError: Template '${FROM_TEMPLATE}' not found.\033[0m" >&2
+            echo -e "\033[36mAvailable templates:\033[0m" >&2
+            local t_file
+            for t_file in "$config_dir_templates"/*.conf; do
+                [ -f "$t_file" ] && echo "  $(basename "$t_file" .conf)" >&2
+            done
+            return 1
+        fi
+
+        # Source template properties
+        local POD_TEMPLATE_FLAVOR=""
+        local POD_TEMPLATE_VOLUMES=""
+        local POD_TEMPLATE_BASE=""
+        local POD_TEMPLATE_PORTS=""
+        local POD_TEMPLATE_WORKSPACE=""
+        # shellcheck disable=SC1090
+        source "$template_path"
+
+        # Apply fallbacks
+        if [ -n "$POD_TEMPLATE_FLAVOR" ] && { [ -z "${4:-}" ] || [ "$flavor" = "all" ] || [ "$flavor" = "standard" ]; }; then
+            flavor="$POD_TEMPLATE_FLAVOR"
+        fi
+        if [ -n "$POD_TEMPLATE_VOLUMES" ] && { [ -z "${5:-}" ] || [ "$volumes" = "all" ] || [ "$volumes" = "standard" ]; }; then
+            volumes="$POD_TEMPLATE_VOLUMES"
+        fi
+        if [ -n "$POD_TEMPLATE_BASE" ] && { [ -z "${6:-}" ] || [ "$base_in" = "$BASE_IMAGE" ]; }; then
+            base_in="$POD_TEMPLATE_BASE"
+            _resolve_base_image "$base_in"
+        fi
+        if [ -n "$POD_TEMPLATE_PORTS" ] && [ -z "${PORTS_OVERRIDE:-}" ]; then
+            PORTS_OVERRIDE="$POD_TEMPLATE_PORTS"
+        fi
+        if [ -n "$POD_TEMPLATE_WORKSPACE" ] && [ -z "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
+            WORKSPACE_DIR_OVERRIDE="$POD_TEMPLATE_WORKSPACE"
+        fi
+    fi
+
     local service_name="${agent}@${instance}.service"
     local container_name="${agent}-${instance}"
     local quadlet_file="$HOME/.config/containers/systemd/${agent}@.container"
@@ -232,10 +272,13 @@
             fi
         fi
 
+        local capitalized_agent
+        capitalized_agent=$(echo "$agent" | awk '{print toupper(substr($0,1,1))substr($0,2)}')
+
         mkdir -p "$(dirname "$quadlet_file")"
         cat <<EOF > "$quadlet_file"
 [Unit]
-Description=${agent^} Agent Sandbox (%i)
+Description=${capitalized_agent} Agent Sandbox (%i)
 
 [Container]
 Image=${image_name}

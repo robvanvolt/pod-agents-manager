@@ -19,12 +19,13 @@ _pod_agents_main() {
     local config_dir_flavors="$config_dir_root/flavors"
     local config_dir_skills="$config_dir_root/skills"
     local config_dir_volumes="$config_dir_root/volumes"
+    local config_dir_templates="$config_dir_root/templates"
     local pod_version_file="$config_dir_root/version.conf"
     local pod_env_file="$config_dir_root/.env"
     local pod_env_example_file="$config_dir_root/.env.example"
     local pod_version_default="0.2.2"
 
-    mkdir -p "$config_dir_root" "$config_dir_agents" "$config_dir_flavors" "$config_dir_skills" "$config_dir_volumes" "$config_dir_root/lib"
+    mkdir -p "$config_dir_root" "$config_dir_agents" "$config_dir_flavors" "$config_dir_skills" "$config_dir_volumes" "$config_dir_templates" "$config_dir_root/lib"
 
     # Lib modules are sourced in numeric order. Each lib ends with the
     # sentinel `return 99` to mean "fell off the end, continue to next lib".
@@ -61,5 +62,5 @@ if ! [[ "$_pod_user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
 fi
 
 eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --no-cache --cached --all -h -v" "$_pod_user_cmd_name"
+complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --from-template --no-cache --cached --all -h -v" "$_pod_user_cmd_name"
 unset _pod_user_cmd_name

@@ -42,6 +42,10 @@
         <button type="button" id="auth-token-toggle" onclick="toggleTokenVisibility()">Show</button>
       </div>
       <p id="auth-error" class="auth-error" aria-live="polite"></p>
+      <div class="auth-remember-row" style="margin: 0 0 16px 0; display: flex; align-items: center; gap: 8px;">
+        <input type="checkbox" id="auth-remember" name="remember" checked style="margin: 0; cursor: pointer;">
+        <label for="auth-remember" style="font-size: 13px; opacity: 0.85; cursor: pointer; user-select: none;">Remember API key on this device</label>
+      </div>
       <div class="auth-actions">
         <button type="button" id="auth-passkey-button" onclick="loginWithPasskey()" hidden>Use Passkey</button>
         <button type="button" onclick="closeAuthDialog()">Cancel</button>
@@ -102,8 +106,11 @@
           <h2 id="log-title">Journal</h2>
           <p id="log-meta">waiting for logs</p>
         </div>
-        <div class="log-head-actions">
-          <button type="button" class="icon-btn" title="Refresh journal" aria-label="Refresh journal" onclick="loadLogs()"><span data-icon="refresh"></span></button>
+        <div class="log-head-actions" style="display: flex; align-items: center; gap: 12px;">
+          <div class="follow-tail-wrap" style="display: flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="log-follow-tail" checked style="margin: 0; cursor: pointer;">
+            <label for="log-follow-tail" style="font-size: 12px; opacity: 0.85; cursor: pointer; user-select: none;">Follow Tail</label>
+          </div>
           <button type="button" aria-label="Close journal" onclick="closeLogs()">×</button>
         </div>
       </div>
@@ -112,71 +119,153 @@
   </dialog>
 
   <div id="dashboard-content" hidden>
-    <div class="card table-card">
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
-          <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Ports</th><th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="stats-body">
-        <tr><td colspan="11">Loading stats…</td></tr>
-      </tbody>
-    </table>
-    </div>
+    <!-- Tab Navigation -->
+    <nav class="tabs-nav">
+      <button class="tab-btn active" onclick="switchTab('overview')"><span data-icon="terminal" style="margin-right: 6px;"></span>Overview</button>
+      <button class="tab-btn" onclick="switchTab('batches')"><span data-icon="activity" style="margin-right: 6px;"></span>Batch Runs</button>
+      <button class="tab-btn" onclick="switchTab('settings')"><span data-icon="settings" style="margin-right: 6px;"></span>Agent Manager & Settings</button>
+    </nav>
 
-    <div class="card">
-      <h2>Create new pod</h2>
-      <form id="create-form" onsubmit="return submitCreate(event)">
-        <div class="grid">
-          <div><label>Agent</label><select name="agent" id="f-agent" required></select></div>
-          <div><label>Instance <span style="opacity:.6">(blank = auto)</span></label><input name="instance" id="f-instance" placeholder="dev, alpha, …"></div>
-          <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
-          <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
-          <div><label>Base image</label><select name="base" id="f-base"></select></div>
-        </div>
-        <div class="actions-row">
-          <button type="submit" class="primary" id="f-submit">Start pod</button>
-          <span id="f-status" style="font-size: 12px; opacity:.8;"></span>
-        </div>
-        <pre class="out" id="f-out"></pre>
-      </form>
-    </div>
-
-    <div class="card install-card">
-      <div class="section-head">
-        <h2>Install status</h2>
-        <div class="section-actions">
-          <button type="button" class="icon-btn" title="Refresh install status" aria-label="Refresh install status" onclick="fetchUpdateStatus(true)"><span data-icon="refresh"></span></button>
-        </div>
+    <!-- Tab 1: Overview -->
+    <div id="tab-overview" class="tab-content active">
+      <div class="card table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Name</th><th>Activity</th><th>CPU %</th><th>MEM Usage</th><th>MEM %</th>
+              <th>NET I/O</th><th>BLOCK I/O</th><th>PIDS</th><th>Ports</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="stats-body">
+            <tr><td colspan="11">Loading stats…</td></tr>
+          </tbody>
+        </table>
       </div>
-      <div id="install-status" class="install-status" aria-live="polite">
-        Loading install status...
+
+      <div class="card">
+        <h2>Create new pod</h2>
+        <form id="create-form" onsubmit="return submitCreate(event)">
+          <div class="grid">
+            <div><label>Agent</label><select name="agent" id="f-agent" required></select></div>
+            <div><label>Instance <span style="opacity:.6">(blank = auto)</span></label><input name="instance" id="f-instance" placeholder="dev, alpha, …"></div>
+            <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
+            <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
+            <div><label>Base image</label><select name="base" id="f-base"></select></div>
+          </div>
+          <div class="actions-row">
+            <button type="submit" class="primary" id="f-submit">Start pod</button>
+            <span id="f-status" style="font-size: 12px; opacity:.8;"></span>
+          </div>
+          <pre class="out" id="f-out"></pre>
+        </form>
       </div>
     </div>
 
-    <div class="card table-card batch-card">
-      <div class="section-head">
-        <h2>Batch runs</h2>
-        <div class="section-actions">
-          <button type="button" id="batch-export-button" class="icon-btn" title="Export selected batch runs" aria-label="Export selected batch runs" onclick="exportSelectedBatches()" disabled><span data-icon="download"></span></button>
-          <button type="button" class="icon-btn" title="Refresh batch runs" aria-label="Refresh batch runs" onclick="loadBatches()"><span data-icon="refresh"></span></button>
+    <!-- Tab 2: Batch Runs -->
+    <div id="tab-batches" class="tab-content">
+      <div class="card table-card batch-card">
+        <div class="section-head">
+          <h2>Batch runs</h2>
+          <div class="section-actions" style="display: flex; align-items: center; gap: 8px;">
+            <button type="button" id="batch-delete-button" class="icon-btn danger" title="Delete selected batch runs" aria-label="Delete selected batch runs" onclick="confirmDeleteSelectedBatches()" disabled><span data-icon="trash"></span></button>
+            <button type="button" id="batch-export-button" class="icon-btn" title="Export selected batch runs" aria-label="Export selected batch runs" onclick="exportSelectedBatches()" disabled><span data-icon="download"></span></button>
+            <button type="button" class="icon-btn" title="Refresh batch runs" aria-label="Refresh batch runs" onclick="loadBatches()"><span data-icon="refresh"></span></button>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="batch-select-head"><input id="batch-select-all" type="checkbox" aria-label="Select all visible batch runs" onchange="selectVisibleBatches(this.checked)"></th>
+              <th>Batch</th><th>Status</th><th>Progress</th><th>Runners</th><th>Source</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="batch-body">
+            <tr><td colspan="7">Loading batch runs…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab 3: Settings -->
+    <div id="tab-settings" class="tab-content">
+      <!-- Agent Manager Panel -->
+      <div class="card">
+        <h2>Autonomous Agent Manager Settings</h2>
+        <p style="opacity: 0.8; font-size: 14px; margin-bottom: 20px;">
+          The Agent Manager background daemon automatically detects active developer pods that are IDLE and waiting for input, and uses the LLM completions API to autonomously instruct and advance them.
+        </p>
+
+        <!-- Active Environment Configuration Info Panel -->
+        <div class="agent-env-info">
+          <div>
+            <span class="env-label">LLM V1 Endpoint</span>
+            <input type="text" id="am-env-endpoint" class="env-input" placeholder="https://api.openai.com/v1">
+          </div>
+          <div>
+            <span class="env-label">Active Model</span>
+            <input type="text" id="am-env-model" class="env-input" placeholder="gpt-4o">
+          </div>
+          <div>
+            <span class="env-label">API Credentials</span>
+            <input type="text" id="am-env-apikey" class="env-input" placeholder="API Key (Not Set)">
+          </div>
+        </div>
+
+        <form id="agent-manager-form" onsubmit="return submitAgentManagerConfig(event)">
+          <div class="form-row" style="margin-bottom: 16px;">
+            <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: bold;">
+              <input type="checkbox" id="am-enabled">
+              Enable Autonomous Agent Manager
+            </label>
+          </div>
+          
+          <div class="grid" style="margin-bottom: 16px;">
+            <div>
+              <label for="am-start-hour">Running Start Hour (Local Time)</label>
+              <select id="am-start-hour"></select>
+            </div>
+            <div>
+              <label for="am-end-hour">Running End Hour (Local Time)</label>
+              <select id="am-end-hour"></select>
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 16px;">
+            <label for="am-prompt" style="font-weight: bold; display: block; margin-bottom: 6px;">Manager System Prompt</label>
+            <textarea id="am-prompt" rows="8" style="width: 100%; font-family: monospace; font-size: 13px; padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.2); color: #fff; resize: vertical;" placeholder="Enter system prompt instructions for the manager daemon..."></textarea>
+          </div>
+          
+          <div class="actions-row">
+            <button type="submit" class="primary">Save Configuration</button>
+            <span id="am-status" style="font-size: 12px; opacity: 0.8;"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- Agent Manager Logs Console -->
+      <div class="card">
+        <div class="section-head">
+          <h2>Agent Manager Activity Logs</h2>
+          <div class="section-actions">
+            <button type="button" class="icon-btn" title="Refresh logs" aria-label="Refresh logs" onclick="loadAgentManagerLogs()"><span data-icon="refresh"></span></button>
+          </div>
+        </div>
+        <pre id="am-logs-console" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); padding: 16px; border-radius: 8px; font-family: monospace; font-size: 13px; color: #adbac7; max-height: 350px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5; margin: 0;"></pre>
+      </div>
+
+      <!-- Install Status Card -->
+      <div class="card install-card">
+        <div class="section-head">
+          <h2>Install status</h2>
+          <div class="section-actions">
+            <button type="button" class="icon-btn" title="Refresh install status" aria-label="Refresh install status" onclick="fetchUpdateStatus(true)"><span data-icon="refresh"></span></button>
+          </div>
+        </div>
+        <div id="install-status" class="install-status" aria-live="polite">
+          Loading install status...
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th class="batch-select-head"><input id="batch-select-all" type="checkbox" aria-label="Select all visible batch runs" onchange="selectVisibleBatches(this.checked)"></th>
-            <th>Batch</th><th>Status</th><th>Progress</th><th>Runners</th><th>Source</th><th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="batch-body">
-          <tr><td colspan="7">Loading batches...</td></tr>
-        </tbody>
-      </table>
     </div>
-  </div>
   </div>
 
   <script src="./vendor/simplewebauthn/browser.js"></script>
@@ -185,8 +274,9 @@
     let authState = { role: 'viewer', authenticated: false };
     let passkeyCache = [];
     let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, openTailUntil: 0, term: null, rendering: false };
-    let logState = { kind: 'pod', agent: '', instance: '', batch: '', target: '' };
+    let logState = { kind: 'pod', agent: '', instance: '', batch: '', target: '', socket: null };
     let requestState = { agent: '', instance: '' };
+    let telemetryHistory = {};
 
     const fmtBytes = (raw) => {
       const n = Number(raw);
@@ -266,6 +356,33 @@
       return binding;
     };
     const bracketIPv6 = (host) => String(host || '').includes(':') ? `[${host}]` : host;
+    let portPingCache = {};
+
+    async function pingPort(port) {
+      const now = Date.now();
+      const cached = portPingCache[port];
+      if (cached && now - cached.checkedAt < 5000) {
+        updatePortPingUI(port, cached.reachable);
+        return;
+      }
+      try {
+        const res = await fetch(`/api/ports/ping?port=${port}`);
+        if (res.ok) {
+          const data = await res.json();
+          portPingCache[port] = { reachable: data.reachable, checkedAt: now };
+          updatePortPingUI(port, data.reachable);
+        }
+      } catch (_) {}
+    }
+
+    function updatePortPingUI(port, reachable) {
+      const dot = document.getElementById(`port-${port}-dot`);
+      if (dot) {
+        dot.className = `port-ping-dot ${reachable ? 'up' : 'down'}`;
+        dot.title = reachable ? 'Port is active and listening' : 'Port is closed or not listening';
+      }
+    }
+
     const publishedPorts = (ports) => {
       if (!Array.isArray(ports) || ports.length === 0) return '-';
       const chips = ports.map(port => {
@@ -274,16 +391,22 @@
         const protocol = String(port.protocol || 'tcp').trim().toLowerCase();
         const label = `${hostPort || '?'} -> ${containerPort || '?'}/${protocol}`;
         const urlHost = portURLHost(port.hostIP);
+        const chipId = `port-${hostPort}`;
         if (protocol === 'tcp' && /^\d+$/.test(hostPort) && urlHost) {
           const href = `http://${bracketIPv6(urlHost)}:${hostPort}/`;
-          return `<a class="port-chip open" href="${escapeHTML(href)}" target="_blank" rel="noopener" title="Open host port ${escapeHTML(hostPort)} in a new tab">${escapeHTML(label)}</a>`;
+          pingPort(hostPort);
+          return `<a class="port-chip open" id="${chipId}" href="${escapeHTML(href)}" target="_blank" rel="noopener" title="Open host port ${escapeHTML(hostPort)} in a new tab">
+            <span class="port-ping-dot" id="${chipId}-dot"></span>
+            ${escapeHTML(label)}
+          </a>`;
         }
-        return `<span class="port-chip" title="Published host port">${escapeHTML(label)}</span>`;
+        return `<span class="port-chip" id="${chipId}" title="Published host port">${escapeHTML(label)}</span>`;
       }).join('');
       return `<div class="port-links">${chips}</div>`;
     };
     const icon = (name) => {
       const paths = {
+        cpu: '<rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M9 9h6v6H9z"></path><path d="M9 1v3"></path><path d="M15 1v3"></path><path d="M9 20v3"></path><path d="M15 20v3"></path><path d="M20 9h3"></path><path d="M20 15h3"></path><path d="M1 9h3"></path><path d="M1 15h3"></path>',
         binoculars: '<path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path><path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path><path d="M9 5h6"></path><path d="M10 8h4"></path><circle cx="7" cy="16" r="4"></circle><circle cx="17" cy="16" r="4"></circle><path d="M11 16h2"></path>',
         check: '<path d="M20 6 9 17l-5-5"></path>',
         download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path>',
@@ -296,6 +419,7 @@
         square: '<rect x="5" y="5" width="14" height="14" rx="1"></rect>',
         trash: '<path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 15H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>',
         alert: '<path d="m10.3 2.9-8.2 14a2 2 0 0 0 1.7 3h16.4a2 2 0 0 0 1.7-3l-8.2-14a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>',
+        cpu: '<rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><path d="M9 1v3"></path><path d="M15 1v3"></path><path d="M9 20v3"></path><path d="M15 20v3"></path><path d="M20 9h3"></path><path d="M20 15h3"></path><path d="M1 9h3"></path><path d="M1 15h3"></path>',
         dot: '<circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle>',
       };
       return `<svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">${paths[name] || paths.dot}</svg>`;
@@ -364,12 +488,36 @@
       }
     }
 
+    let isAutoLoggingIn = false;
     async function fetchAuthStatus() {
       try {
         const res = await fetch('/api/auth/status');
         authState = await res.json();
       } catch (_) {
         authState = { role: 'viewer', authenticated: false };
+      }
+      if (!authState.authenticated && !isAutoLoggingIn) {
+        const savedToken = localStorage.getItem('pod_dashboard_token');
+        if (savedToken) {
+          isAutoLoggingIn = true;
+          try {
+            const body = new URLSearchParams();
+            body.append('token', savedToken);
+            const res = await fetch('/api/auth/login', { method: 'POST', body });
+            if (res.ok) {
+              showToast('Dashboard auto-unlocked');
+              const resStatus = await fetch('/api/auth/status');
+              authState = await resStatus.json();
+              refreshDashboardData();
+            } else {
+              localStorage.removeItem('pod_dashboard_token');
+            }
+          } catch (err) {
+            console.error('auto-login failed:', err);
+          } finally {
+            isAutoLoggingIn = false;
+          }
+        }
       }
       renderAuthState();
     }
@@ -412,6 +560,7 @@
 
     async function toggleAuth() {
       if (authState.authenticated) {
+        localStorage.removeItem('pod_dashboard_token');
         await fetch('/api/auth/logout', { method: 'POST' });
         showToast('Dashboard locked');
         await fetchAuthStatus();
@@ -458,6 +607,12 @@
       if (!res.ok) {
         if (err) err.textContent = res.status === 429 ? 'Too many attempts. Try again shortly.' : 'Token rejected.';
         return false;
+      }
+      const remember = document.getElementById('auth-remember')?.checked;
+      if (remember) {
+        localStorage.setItem('pod_dashboard_token', token);
+      } else {
+        localStorage.removeItem('pod_dashboard_token');
       }
       closeAuthDialog();
       showToast('Dashboard unlocked');
@@ -617,6 +772,35 @@
       }
     }
 
+    function drawSparkline(history, key) {
+      if (!history || history.length < 2) return '';
+      const values = history.map(h => h[key]).filter(v => v !== null);
+      if (values.length < 2) return '';
+      const width = 48;
+      const height = 16;
+      const min = 0;
+      const max = Math.max(10, ...values);
+      const points = values.map((val, idx) => {
+        const x = (idx / (values.length - 1)) * width;
+        const y = height - ((val - min) / (max - min)) * height;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(' ');
+      return `<svg class="sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true" style="overflow: visible; color: var(--color-primary-light, #3b82f6);">
+        <polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="${points}" />
+      </svg>`;
+    }
+
+    const heatCellWithSpark = (pct, label, sparkSvg) => {
+      if (pct == null) return `<span>${label}</span>`;
+      return `<div class="heat-wrap">
+        <div class="heat-fill" style="width:${Math.max(0,Math.min(pct,100)).toFixed(2)}%; background:${heatColor(pct)};"></div>
+        <div class="heat-content" style="position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; z-index: 1;">
+          <span class="heat-text">${label}</span>
+          ${sparkSvg}
+        </div>
+      </div>`;
+    };
+
     function renderTable(containers) {
       const tbody = document.getElementById('stats-body');
       if (!containers || containers.length === 0) {
@@ -630,9 +814,24 @@
         const instance = c.PodInstance || (dash > 0 ? name.slice(dash + 1) : '');
         const cpu = parsePct(c.CPU || c.CPUPerc);
         const mem = parsePct(c.MemPerc);
+
+        if (!telemetryHistory[name]) {
+          telemetryHistory[name] = [];
+        }
+        telemetryHistory[name].push({ cpu, mem });
+        if (telemetryHistory[name].length > 10) {
+          telemetryHistory[name].shift();
+        }
+
+        const history = telemetryHistory[name];
+        const cpuSpark = drawSparkline(history, 'cpu');
+        const memSpark = drawSparkline(history, 'mem');
+
         const id = (c.ID || c.ContainerID || '').slice(0, 12);
         const activityState = String(c.ActivityState || '').toLowerCase();
         const activityDetail = String(c.ActivityDetail || '').toLowerCase();
+        const isManaged = activityState !== 'unmanaged' && agent && instance;
+        const managedBadge = isManaged ? `<span class="badge-managed" title="Managed by Autonomous Agent Manager">${icon('cpu')} Managed</span>` : '';
         const canInstruct = activityState === 'idle';
         const canRequest = activityState === 'idle' && activityDetail.includes('waiting for input');
         const canWrite = authState.role === 'operator';
@@ -649,11 +848,11 @@
           </div>` : '';
         return `<tr>
           <td data-label="ID"><code>${id}</code></td>
-          <td data-label="Name"><b>${name}</b></td>
+          <td data-label="Name"><b>${name}</b>${managedBadge}</td>
           <td data-label="Activity">${activityBadge(c.ActivityState, c.ActivityDetail)}</td>
-          <td data-label="CPU %">${heatCell(cpu, fmtPct(c.CPU || c.CPUPerc))}</td>
+          <td data-label="CPU %">${heatCellWithSpark(cpu, fmtPct(c.CPU || c.CPUPerc), cpuSpark)}</td>
           <td data-label="MEM Usage">${memUsage(c)}</td>
-          <td data-label="MEM %">${heatCell(mem, fmtPct(c.MemPerc))}</td>
+          <td data-label="MEM %">${heatCellWithSpark(mem, fmtPct(c.MemPerc), memSpark)}</td>
           <td data-label="NET I/O">${ioPair(c, ['NetInput','NetworkInput'], ['NetOutput','NetworkOutput'], 'NetIO')}</td>
           <td data-label="BLOCK I/O">${ioPair(c, ['BlockInput'], ['BlockOutput'], 'BlockIO')}</td>
           <td data-label="PIDS">${c.PIDS || c.Pids || c.PIDs || '-'}</td>
@@ -698,17 +897,25 @@
       if (dialog?.open) dialog.close();
     }
 
+    function closeLogSocket() {
+      if (logState.socket) {
+        try { logState.socket.close(); } catch (_) {}
+        logState.socket = null;
+      }
+    }
+
     function openLogs(agent, instance) {
       const dialog = document.getElementById('log-dialog');
       if (!dialog) return;
+      closeLogSocket();
       logState.kind = 'pod';
       logState.agent = agent;
       logState.instance = instance;
       logState.batch = '';
       logState.target = '';
       document.getElementById('log-title').textContent = `${agent}-${instance} journal`;
-      document.getElementById('log-meta').textContent = 'loading journal…';
-      document.getElementById('log-output').textContent = 'Loading journal…';
+      document.getElementById('log-meta').textContent = 'connecting journal stream…';
+      document.getElementById('log-output').textContent = 'Connecting journal stream…\n';
       dialog.showModal();
       loadLogs();
     }
@@ -716,6 +923,7 @@
     function openBatchLog(batch, target) {
       const dialog = document.getElementById('log-dialog');
       if (!dialog) return;
+      closeLogSocket();
       logState.kind = 'batch';
       logState.batch = batch;
       logState.target = target;
@@ -729,6 +937,7 @@
     }
 
     function closeLogs() {
+      closeLogSocket();
       const dialog = document.getElementById('log-dialog');
       if (dialog?.open) dialog.close();
     }
@@ -793,27 +1002,62 @@
       await fetchAuthStatus();
       if (authState.role !== 'operator') {
         meta.textContent = 'journal locked';
-        output.textContent = 'Unlock operator mode first.\n\nJournal snapshots require an active operator session.';
+        output.textContent = 'Unlock operator mode first.\n\nJournal streams require an active operator session.';
         return;
       }
-      meta.textContent = 'loading journal…';
-      const params = new URLSearchParams({ agent: logState.agent, instance: logState.instance });
+      meta.textContent = 'connecting…';
+      
+      const loc = window.location;
+      const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${loc.host}/api/logs/ws?agent=${encodeURIComponent(logState.agent)}&instance=${encodeURIComponent(logState.instance)}`;
+      
       try {
-        const res = await fetch(`/api/logs?${params.toString()}`);
-        const text = await res.text();
-        if (!res.ok) {
-          meta.textContent = 'journal failed';
-          output.textContent = res.status === 401 ? 'Unlock operator mode first.' : text;
-          return;
-        }
-        const data = JSON.parse(text);
-        const captured = data.captured_at ? new Date(data.captured_at).toLocaleTimeString() : 'now';
-        meta.textContent = `${data.unit || 'journal'} · last ${data.lines || '?'} lines · ${captured}`;
-        output.textContent = data.output || '(no journal entries)';
-        output.scrollTop = output.scrollHeight;
+        closeLogSocket();
+        logState.socket = new WebSocket(wsUrl);
+        
+        logState.socket.onopen = () => {
+          meta.textContent = 'streaming journal…';
+          output.textContent = '--- Journal stream started ---\n';
+        };
+        
+        logState.socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'status') {
+              meta.textContent = data.data;
+            } else if (data.type === 'error') {
+              output.textContent += `\nError: ${data.error}\n`;
+            } else if (data.type === 'line') {
+              output.textContent += data.line + '\n';
+              
+              const lines = output.textContent.split('\n');
+              if (lines.length > 1000) {
+                output.textContent = lines.slice(lines.length - 1000).join('\n');
+              }
+              
+              const follow = document.getElementById('log-follow-tail')?.checked;
+              if (follow) {
+                output.scrollTop = output.scrollHeight;
+              }
+            }
+          } catch (e) {
+            console.error('failed parsing websocket line:', e);
+          }
+        };
+        
+        logState.socket.onerror = (err) => {
+          meta.textContent = 'stream error';
+          output.textContent += '\nConnection error occurred.\n';
+        };
+        
+        logState.socket.onclose = () => {
+          meta.textContent = 'stream closed';
+          output.textContent += '\n--- Journal stream disconnected ---\n';
+        };
+        
       } catch (err) {
-        meta.textContent = 'journal failed';
-        output.textContent = 'Network error: ' + err;
+        meta.textContent = 'connection failed';
+        output.textContent = 'WebSocket connection error: ' + err;
       }
     }
 
@@ -1206,7 +1450,7 @@
         const started = batch.started_at ? new Date(batch.started_at).toLocaleString() : 'unknown';
         const source = batch.source || '-';
         return `<tr>
-          <td data-label="Select" class="batch-select-cell"><input type="checkbox" data-batch-select value="${escapeHTML(batch.id)}" aria-label="Select batch ${escapeHTML(batch.id)}" onchange="updateBatchExportState()"></td>
+          <td data-label="Select" class="batch-select-cell"><input type="checkbox" data-batch-select value="${escapeHTML(batch.id)}" aria-label="Select batch ${escapeHTML(batch.id)}" onchange="toggleBatchSelect('${escapeHTML(batch.id)}', this.checked)" ${selectedBatchesSet.has(batch.id) ? 'checked' : ''}></td>
           <td data-label="Batch"><strong>${escapeHTML(batch.id)}</strong><small>${escapeHTML(started)}</small></td>
           <td data-label="Status">${batchStatus(batch.status)}</td>
           <td data-label="Progress">${batchProgress(batch.current, batch.total, batch.total ? Math.round(batch.current * 100 / batch.total) : 0)}${batchResults(batch.results)}${eta}</td>
@@ -1219,27 +1463,52 @@
       renderAuthState();
     }
 
+    const selectedBatchesSet = new Set();
+
     function selectedBatchIDs() {
-      return Array.from(document.querySelectorAll('[data-batch-select]:checked')).map(el => el.value);
+      return Array.from(selectedBatchesSet);
+    }
+
+    function toggleBatchSelect(batchId, checked) {
+      if (checked) {
+        selectedBatchesSet.add(batchId);
+      } else {
+        selectedBatchesSet.delete(batchId);
+      }
+      updateBatchExportState();
     }
 
     function updateBatchExportState() {
-      const selected = selectedBatchIDs();
-      const boxes = Array.from(document.querySelectorAll('[data-batch-select]'));
+      const count = selectedBatchesSet.size;
       const button = document.getElementById('batch-export-button');
+      const delBtn = document.getElementById('batch-delete-button');
+      const boxes = Array.from(document.querySelectorAll('[data-batch-select]'));
+      const visibleSelected = boxes.filter(el => selectedBatchesSet.has(el.value));
       const all = document.getElementById('batch-select-all');
+      
       if (button) {
-        button.disabled = selected.length === 0;
-        button.title = selected.length ? `Export ${selected.length} selected batch run${selected.length === 1 ? '' : 's'}` : 'Select batch runs to export';
+        button.disabled = count === 0;
+        button.title = count ? `Export ${count} selected batch run${count === 1 ? '' : 's'}` : 'Select batch runs to export';
+      }
+      if (delBtn) {
+        delBtn.disabled = count === 0;
+        delBtn.title = count ? `Delete ${count} selected batch run${count === 1 ? '' : 's'}` : 'Select batch runs to delete';
       }
       if (all) {
-        all.checked = boxes.length > 0 && selected.length === boxes.length;
-        all.indeterminate = selected.length > 0 && selected.length < boxes.length;
+        all.checked = boxes.length > 0 && visibleSelected.length === boxes.length;
+        all.indeterminate = visibleSelected.length > 0 && visibleSelected.length < boxes.length;
       }
     }
 
     function selectVisibleBatches(checked) {
-      document.querySelectorAll('[data-batch-select]').forEach(el => { el.checked = checked; });
+      document.querySelectorAll('[data-batch-select]').forEach(el => {
+        el.checked = checked;
+        if (checked) {
+          selectedBatchesSet.add(el.value);
+        } else {
+          selectedBatchesSet.delete(el.value);
+        }
+      });
       updateBatchExportState();
     }
 
@@ -1261,6 +1530,157 @@
       document.body.appendChild(link);
       link.click();
       link.remove();
+    }
+
+    async function confirmDeleteSelectedBatches() {
+      const ids = Array.from(selectedBatchesSet);
+      if (ids.length === 0) return;
+      const msg = `Are you sure you want to permanently delete the following ${ids.length} batch run${ids.length === 1 ? '' : 's'}?\n\n` + ids.join('\n') + `\n\nThis will stop any running instances and delete all batch files.`;
+      if (!confirm(msg)) return;
+
+      const btn = document.getElementById('batch-delete-button');
+      if (btn) btn.disabled = true;
+
+      try {
+        const body = new URLSearchParams({ batches: ids.join(',') });
+        const res = await fetch('/api/batches/delete', { method: 'POST', body });
+        const text = await res.text();
+        if (res.ok) {
+          showToast(`Successfully deleted ${ids.length} batch run${ids.length === 1 ? '' : 's'}`);
+          selectedBatchesSet.clear();
+          loadBatches();
+        } else {
+          showToast(text || 'Failed to delete batches', true);
+          updateBatchExportState();
+        }
+      } catch (err) {
+        showToast('Network error: ' + err, true);
+        updateBatchExportState();
+      }
+    }
+
+    // --- Tab Navigation & Settings Helpers ---
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick')?.includes(`'${tabId}'`)) {
+          btn.classList.add('active');
+        }
+      });
+
+      if (tabId === 'settings') {
+        loadAgentManagerConfig();
+        loadAgentManagerLogs();
+      }
+
+      document.querySelectorAll('.tab-content').forEach(panel => {
+        panel.classList.remove('active');
+      });
+      const activePanel = document.getElementById('tab-' + tabId);
+      if (activePanel) {
+        activePanel.classList.add('active');
+      }
+    }
+
+    function initAgentHours() {
+      const startSelect = document.getElementById('am-start-hour');
+      const endSelect = document.getElementById('am-end-hour');
+      if (startSelect && endSelect) {
+        startSelect.innerHTML = '';
+        endSelect.innerHTML = '';
+        for (let i = 0; i < 24; i++) {
+          const pad = i.toString().padStart(2, '0');
+          const startOpt = document.createElement('option');
+          startOpt.value = i;
+          startOpt.textContent = `${pad}:00`;
+          startSelect.appendChild(startOpt);
+
+          const endOpt = document.createElement('option');
+          endOpt.value = i;
+          endOpt.textContent = `${pad}:00`;
+          endSelect.appendChild(endOpt);
+        }
+      }
+    }
+
+    async function loadAgentManagerConfig() {
+      if (authState.role !== 'operator') return;
+      try {
+        const res = await fetch('/api/agent-manager/config');
+        if (!res.ok) throw new Error(await res.text());
+        const cfg = await res.json();
+        
+        document.getElementById('am-enabled').checked = cfg.enabled;
+        document.getElementById('am-start-hour').value = cfg.start_hour;
+        document.getElementById('am-end-hour').value = cfg.end_hour;
+        document.getElementById('am-prompt').value = cfg.system_prompt;
+
+        // Populate active environment configuration details
+        const endpointEl = document.getElementById('am-env-endpoint');
+        const modelEl = document.getElementById('am-env-model');
+        const apikeyEl = document.getElementById('am-env-apikey');
+        if (endpointEl) endpointEl.value = cfg.base_url || 'https://api.openai.com/v1';
+        if (modelEl) modelEl.value = cfg.model || 'gpt-4o';
+        if (apikeyEl) apikeyEl.value = cfg.api_key || 'Not Set';
+      } catch (err) {
+        console.error('Failed to load Agent Manager config:', err);
+      }
+    }
+
+    async function submitAgentManagerConfig(ev) {
+      ev.preventDefault();
+      const statusEl = document.getElementById('am-status');
+      if (statusEl) statusEl.textContent = 'Saving...';
+      
+      const payload = {
+        enabled: document.getElementById('am-enabled').checked,
+        start_hour: parseInt(document.getElementById('am-start-hour').value, 10),
+        end_hour: parseInt(document.getElementById('am-end-hour').value, 10),
+        system_prompt: document.getElementById('am-prompt').value,
+        base_url: document.getElementById('am-env-endpoint').value,
+        model: document.getElementById('am-env-model').value,
+        api_key: document.getElementById('am-env-apikey').value
+      };
+
+      try {
+        const res = await fetch('/api/agent-manager/config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          if (statusEl) statusEl.textContent = 'Saved successfully!';
+          showToast('Agent Manager configuration saved');
+          setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+          // Reload config to get the masked keys and updated fallback values
+          loadAgentManagerConfig();
+        } else {
+          const txt = await res.text();
+          if (statusEl) statusEl.textContent = 'Failed to save';
+          showToast('Error: ' + txt, true);
+        }
+      } catch (err) {
+        if (statusEl) statusEl.textContent = 'Error';
+        showToast('Network error: ' + err, true);
+      }
+    }
+
+    async function loadAgentManagerLogs() {
+      if (authState.role !== 'operator') return;
+      const consoleEl = document.getElementById('am-logs-console');
+      if (!consoleEl) return;
+      try {
+        const res = await fetch('/api/agent-manager/logs');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        consoleEl.textContent = data.logs || '(No logs recorded yet)';
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      } catch (err) {
+        consoleEl.textContent = 'Failed to load activity logs: ' + err;
+      }
     }
 
     async function loadBatches() {
@@ -1339,9 +1759,15 @@
       loadAgentOptions();
       fetchUpdateStatus();
       loadBatches();
+      if (document.getElementById('tab-settings').classList.contains('active')) {
+        loadAgentManagerLogs();
+      }
     }
 
-    fetchAuthStatus().then(refreshDashboardData);
+    fetchAuthStatus().then(() => {
+      initAgentHours();
+      refreshDashboardData();
+    });
     document.getElementById('terminal-dialog')?.addEventListener('close', () => {
       closeTerminalSocket();
     });
@@ -1353,6 +1779,11 @@
     }, { passive: true });
     setInterval(fetchStats, 3000);
     setInterval(loadBatches, 5000);
+    setInterval(() => {
+      if (authState.role === 'operator' && document.getElementById('tab-settings').classList.contains('active')) {
+        loadAgentManagerLogs();
+      }
+    }, 5000);
     setInterval(() => { if (authState.role === 'operator') fetchInfo(); }, 30000);
     setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);

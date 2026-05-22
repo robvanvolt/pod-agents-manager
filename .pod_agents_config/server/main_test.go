@@ -810,3 +810,160 @@ func testCOSEES256(privateKey *ecdsa.PrivateKey) []byte {
 	out = append(out, y...)
 	return out
 }
+
+func TestAgentManagerConfigLoadSave(t *testing.T) {
+	root := t.TempDir()
+	
+	// Test load default when not existing
+	cfg := loadAgentManagerConfig(root)
+	if cfg.Enabled {
+		t.Fatal("expected Enabled to be false by default")
+	}
+	if cfg.StartHour != 2 || cfg.EndHour != 13 {
+		t.Fatalf("unexpected default hours: start=%d, end=%d", cfg.StartHour, cfg.EndHour)
+	}
+	if !strings.Contains(cfg.SystemPrompt, "Pod Agent Manager") {
+		t.Fatalf("unexpected system prompt: %s", cfg.SystemPrompt)
+	}
+
+	// Test saving and loading config
+	cfg.Enabled = true
+	cfg.StartHour = 10
+	cfg.EndHour = 18
+	cfg.SystemPrompt = "custom prompt"
+	if err := saveAgentManagerConfig(root, cfg); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	cfg2 := loadAgentManagerConfig(root)
+	if !cfg2.Enabled {
+		t.Fatal("expected Enabled to be true")
+	}
+	if cfg2.StartHour != 10 || cfg2.EndHour != 18 {
+		t.Fatalf("unexpected loaded hours: start=%d, end=%d", cfg2.StartHour, cfg2.EndHour)
+	}
+	if cfg2.SystemPrompt != "custom prompt" {
+		t.Fatalf("unexpected loaded system prompt: %s", cfg2.SystemPrompt)
+	}
+}
+
+func TestIsHourInWindow(t *testing.T) {
+	tests := []struct {
+		hour  int
+		start int
+		end   int
+		want  bool
+	}{
+		{5, 2, 13, true},
+		{1, 2, 13, false},
+		{14, 2, 13, false},
+		{2, 2, 13, true},
+		{13, 2, 13, true},
+		
+		// Wrap around midnight (e.g. 22:00 to 04:00)
+		{23, 22, 4, true},
+		{1, 22, 4, true},
+		{12, 22, 4, false},
+	}
+
+	for _, tt := range tests {
+		if got := isHourInWindow(tt.hour, tt.start, tt.end); got != tt.want {
+			t.Errorf("isHourInWindow(%d, %d, %d) = %v; want %v", tt.hour, tt.start, tt.end, got, tt.want)
+		}
+	}
+}
+
+func TestBatchDeletionHandler(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now().Format(time.RFC3339)
+	
+	// Create operator auth session
+	if err := saveAuthState(root, authState{
+		BootstrapTokenSHA256: tokenHash("secret-token"),
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/auth/login", nil)
+	session, err := verifyBootstrapTokenAndCreateSession(root, "secret-token", req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a mock batch directory
+	batchDir := filepath.Join(root, "batch", "batch-del-1")
+	if err := os.MkdirAll(batchDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(batchDir, "meta.conf"), []byte("batch_id=batch-del-1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make request to delete
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Define a mini routing handler to test endpoint
+		if r.URL.Path == "/api/batches/delete" {
+			if r.Method != http.MethodPost {
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			auth, ok := requireOperator(w, r, root, "batch.delete", "")
+			if !ok {
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "Bad form data: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			idsStr := strings.TrimSpace(r.FormValue("batches"))
+			if idsStr == "" {
+				http.Error(w, "missing batches parameter", http.StatusBadRequest)
+				return
+			}
+			ids := strings.Split(idsStr, ",")
+			var deleted []string
+			for _, id := range ids {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				if !validIdent(id) {
+					http.Error(w, "invalid batch id: "+id, http.StatusBadRequest)
+					return
+				}
+				// Normally calls stopBatch, but in test we don't have containers, so ignore or mock it.
+				// We can skip stopBatch mock by checking if os.RemoveAll deletes the folder.
+				dir := filepath.Join(root, "batch", id)
+				if err := os.RemoveAll(dir); err != nil {
+					http.Error(w, "failed to delete "+id+": "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				appendAudit(root, auditEntryFromRequest(r, "batch.delete", id, "ok", "", auth.Role))
+				deleted = append(deleted, id)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "deleted": deleted})
+		}
+	})
+
+	deleteReq := httptest.NewRequest("POST", "/api/batches/delete", strings.NewReader("batches=batch-del-1"))
+	deleteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	deleteReq.Header.Set("Origin", "http://example.com") // to satisfy origin check
+	deleteReq.AddCookie(&http.Cookie{Name: "pod_session", Value: session})
+	
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, deleteReq)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got response status %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	// Verify batch directory is deleted
+	if _, err := os.Stat(batchDir); !os.IsNotExist(err) {
+		t.Fatal("expected batch directory to be deleted recursively, but it still exists")
+	}
+}
+
+

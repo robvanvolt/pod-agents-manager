@@ -19,7 +19,8 @@ Usage:
   ${_cmd} [--version|-v]
   ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base]
             [--model NAME] [--endpoint URL] [--api-key KEY]
-            [--ports HOST:CONTAINER[,...]] [--no-cache | --cached]
+            [--ports HOST:CONTAINER[,...]] [--from-template NAME]
+            [--no-cache | --cached]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all
@@ -118,6 +119,7 @@ EOF
         _pod_merge_tree "$src_root/.pod_agents_config/flavors" "$config_dir_flavors"
         _pod_merge_tree "$src_root/.pod_agents_config/volumes" "$config_dir_volumes"
         _pod_merge_tree "$src_root/.pod_agents_config/skills" "$config_dir_skills"
+        _pod_merge_tree "$src_root/.pod_agents_config/templates" "$config_dir_root/templates"
         _pod_merge_tree "$src_root/.pod_agents_config/lib" "$config_dir_root/lib"
         _pod_merge_tree "$src_root/.pod_agents_config/server" "$config_dir_root/server"
         rm -f "$config_dir_root/server/static/favicon.ico"

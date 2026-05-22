@@ -231,7 +231,7 @@ EOF
                 case "$-" in *m*) _prev_monitor=1 ;; esac
                 set +m
                 cd "$server_dir" || { [ "$_prev_monitor" = "1" ] && set -m; return 1; }
-                POD_SERVER_API_KEY="$POD_SERVER_API_KEY" POD_SERVER_PORT="$server_port" nohup "$server_bin" >>"$server_log_file" 2>&1 </dev/null &
+                OPENAI_API_KEY="$OPENAI_API_KEY" OPENAI_BASE_URL="$OPENAI_BASE_URL" DEFAULT_MODEL="$DEFAULT_MODEL" POD_DEFAULT_MODEL="$POD_DEFAULT_MODEL" POD_IMAGE_CACHE_ROOT="$POD_IMAGE_CACHE_ROOT" POD_WORKSPACES_ROOT="$POD_WORKSPACES_ROOT" POD_BASE_IMAGE="$POD_BASE_IMAGE" POD_SERVER_API_KEY="$POD_SERVER_API_KEY" POD_SERVER_PORT="$server_port" nohup "$server_bin" >>"$server_log_file" 2>&1 </dev/null &
                 local server_pid=$!
                 disown 2>/dev/null || true
                 cd - >/dev/null 2>&1 || true

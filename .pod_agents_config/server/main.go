@@ -91,6 +91,26 @@ func main() {
 	go updateStatsLoop()
 
 	root := filepath.Join(os.Getenv("HOME"), ".pod_agents_config")
+
+	// Load env from .env file into the process environment
+	envVars := readEnvFile(root)
+	for k, v := range envVars {
+		if os.Getenv(k) == "" {
+			os.Setenv(k, v)
+		}
+		// Map special POD_* variables to standard OpenAI names if they are not set
+		if k == "POD_OPENAI_API_KEY" && os.Getenv("OPENAI_API_KEY") == "" {
+			os.Setenv("OPENAI_API_KEY", v)
+		}
+		if k == "POD_OPENAI_BASE_URL" && os.Getenv("OPENAI_BASE_URL") == "" {
+			os.Setenv("OPENAI_BASE_URL", v)
+		}
+		if k == "POD_DEFAULT_MODEL" && os.Getenv("DEFAULT_MODEL") == "" {
+			os.Setenv("DEFAULT_MODEL", v)
+		}
+	}
+
+	go startAgentManagerLoop(root)
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(http.FileServer(http.Dir("./static"))))
 
@@ -617,8 +637,236 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "batch": id})
 	})
 
+	mux.HandleFunc("/api/batches/delete", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		auth, ok := requireOperator(w, r, root, "batch.delete", "")
+		if !ok {
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Bad form data: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		idsStr := strings.TrimSpace(r.FormValue("batches"))
+		if idsStr == "" {
+			http.Error(w, "missing batches parameter", http.StatusBadRequest)
+			return
+		}
+		ids := strings.Split(idsStr, ",")
+		var deleted []string
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if !validIdent(id) {
+				appendAudit(root, auditEntryFromRequest(r, "batch.delete", id, "error", "invalid batch id", auth.Role))
+				http.Error(w, "invalid batch id: "+id, http.StatusBadRequest)
+				return
+			}
+			_ = stopBatch(root, id)
+			dir := filepath.Join(batchRoot(root), id)
+			if err := os.RemoveAll(dir); err != nil {
+				appendAudit(root, auditEntryFromRequest(r, "batch.delete", id, "error", err.Error(), auth.Role))
+				http.Error(w, "failed to delete "+id+": "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			appendAudit(root, auditEntryFromRequest(r, "batch.delete", id, "ok", "", auth.Role))
+			deleted = append(deleted, id)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "deleted": deleted})
+	})
+
+	mux.HandleFunc("/api/agent-manager/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if !requireOperatorRead(w, r, root) {
+				return
+			}
+			cfg := loadAgentManagerConfig(root)
+			envs := readEnvFile(root)
+
+			key := envs["POD_OPENAI_API_KEY"]
+			if key == "" {
+				key = os.Getenv("OPENAI_API_KEY")
+			}
+			maskedKey := "Not Set"
+			if key != "" {
+				if len(key) > 8 {
+					maskedKey = key[:4] + "..." + key[len(key)-4:]
+				} else {
+					maskedKey = "Configured"
+				}
+			}
+
+			baseURL := envs["POD_OPENAI_BASE_URL"]
+			if baseURL == "" {
+				baseURL = os.Getenv("OPENAI_BASE_URL")
+			}
+			if baseURL == "" {
+				baseURL = "https://api.openai.com/v1"
+			}
+
+			model := envs["POD_DEFAULT_MODEL"]
+			if model == "" {
+				model = os.Getenv("POD_DEFAULT_MODEL")
+			}
+			if model == "" {
+				model = os.Getenv("DEFAULT_MODEL")
+			}
+			if model == "" {
+				model = "gpt-4o"
+			}
+
+			response := map[string]any{
+				"enabled":       cfg.Enabled,
+				"system_prompt": cfg.SystemPrompt,
+				"start_hour":    cfg.StartHour,
+				"end_hour":      cfg.EndHour,
+				"api_key":       maskedKey,
+				"base_url":      baseURL,
+				"model":         model,
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(response)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			auth, ok := requireOperator(w, r, root, "agent-manager.config", "")
+			if !ok {
+				return
+			}
+
+			type AgentManagerConfigRequest struct {
+				Enabled      bool   `json:"enabled"`
+				SystemPrompt string `json:"system_prompt"`
+				StartHour    int    `json:"start_hour"`
+				EndHour      int    `json:"end_hour"`
+				ApiKey       string `json:"api_key,omitempty"`
+				BaseUrl      string `json:"base_url,omitempty"`
+				Model        string `json:"model,omitempty"`
+			}
+
+			var req AgentManagerConfigRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid request body: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if req.StartHour < 0 || req.StartHour > 23 || req.EndHour < 0 || req.EndHour > 23 {
+				http.Error(w, "invalid hours", http.StatusBadRequest)
+				return
+			}
+
+			cfg := AgentManagerConfig{
+				Enabled:      req.Enabled,
+				SystemPrompt: req.SystemPrompt,
+				StartHour:    req.StartHour,
+				EndHour:      req.EndHour,
+			}
+			if err := saveAgentManagerConfig(root, cfg); err != nil {
+				appendAudit(root, auditEntryFromRequest(r, "agent-manager.config", "", "error", err.Error(), auth.Role))
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			// Update .env file if new values are provided and they are not masked
+			updates := make(map[string]string)
+			if req.BaseUrl != "" {
+				updates["POD_OPENAI_BASE_URL"] = req.BaseUrl
+			}
+			if req.Model != "" {
+				updates["POD_DEFAULT_MODEL"] = req.Model
+			}
+			if req.ApiKey != "" && req.ApiKey != "Not Set" && !strings.Contains(req.ApiKey, "...") && req.ApiKey != "Configured" {
+				updates["POD_OPENAI_API_KEY"] = req.ApiKey
+			}
+
+			if len(updates) > 0 {
+				if err := updateEnvFile(root, updates); err != nil {
+					appendAudit(root, auditEntryFromRequest(r, "agent-manager.config.env", "", "error", err.Error(), auth.Role))
+					http.Error(w, "failed to update .env: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				// Dynamically update the process environment variables immediately
+				for k, v := range updates {
+					os.Setenv(k, v)
+					if k == "POD_OPENAI_API_KEY" {
+						os.Setenv("OPENAI_API_KEY", v)
+					}
+					if k == "POD_OPENAI_BASE_URL" {
+						os.Setenv("OPENAI_BASE_URL", v)
+					}
+					if k == "POD_DEFAULT_MODEL" {
+						os.Setenv("DEFAULT_MODEL", v)
+					}
+				}
+			}
+
+			appendAudit(root, auditEntryFromRequest(r, "agent-manager.config", "", "ok", "", auth.Role))
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/agent-manager/logs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
+		logs, err := getAgentManagerLogs(root)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"logs": logs})
+	})
+
 	mux.HandleFunc("/api/terminal/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleTerminalWebSocket(w, r, root)
+	})
+
+	mux.HandleFunc("/api/logs/ws", func(w http.ResponseWriter, r *http.Request) {
+		handleLogWebSocket(w, r, root)
+	})
+
+	mux.HandleFunc("/api/ports/ping", func(w http.ResponseWriter, r *http.Request) {
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
+		port := strings.TrimSpace(r.URL.Query().Get("port"))
+		for _, char := range port {
+			if char < '0' || char > '9' {
+				http.Error(w, "invalid port", http.StatusBadRequest)
+				return
+			}
+		}
+		if port == "" {
+			http.Error(w, "missing port", http.StatusBadRequest)
+			return
+		}
+		conn, err := net.DialTimeout("tcp", "127.0.0.1:"+port, 200*time.Millisecond)
+		reachable := false
+		if err == nil {
+			reachable = true
+			conn.Close()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"port":      port,
+			"reachable": reachable,
+		})
 	})
 
 	mux.HandleFunc("/api/terminal/start", func(w http.ResponseWriter, r *http.Request) {
@@ -1441,6 +1689,77 @@ func handleTerminalWebSocket(w http.ResponseWriter, r *http.Request, root string
 			ws.WriteJSON(terminalWSMessage{Type: "error", Error: err.Error()})
 		}
 	case <-ctx.Done():
+	}
+}
+
+func handleLogWebSocket(w http.ResponseWriter, r *http.Request, root string) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	auth := currentAuthContext(r, root)
+	if auth.Role != "operator" {
+		http.Error(w, "operator role required", http.StatusUnauthorized)
+		return
+	}
+	agent := strings.TrimSpace(r.URL.Query().Get("agent"))
+	instance := strings.TrimSpace(r.URL.Query().Get("instance"))
+	if !validIdent(agent) || !validIdent(instance) {
+		http.Error(w, "invalid agent/instance", http.StatusBadRequest)
+		return
+	}
+
+	ws, err := upgradeWebSocket(w, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer ws.Close()
+
+	_ = ws.WriteJSON(map[string]any{"type": "status", "data": "connected, streaming journal…"})
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	unit := podJournalUnit(agent, instance)
+	cmd := exec.CommandContext(ctx, "journalctl", "--user", "-u", unit, "-f", "-n", "100")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		ws.WriteJSON(map[string]any{"type": "error", "error": err.Error()})
+		return
+	}
+	if err := cmd.Start(); err != nil {
+		ws.WriteJSON(map[string]any{"type": "error", "error": err.Error()})
+		return
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	go func() {
+		for {
+			_, err := ws.ReadText()
+			if err != nil {
+				cancel()
+				break
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		msg := map[string]any{
+			"type": "line",
+			"line": stripANSI(line),
+		}
+		if err := ws.WriteJSON(msg); err != nil {
+			break
+		}
+		if ctx.Err() != nil {
+			break
+		}
 	}
 }
 
@@ -4163,4 +4482,362 @@ func readInboxEntries(root, agent, instance string) ([]inboxEntry, error) {
 		}
 	}
 	return entries, nil
+}
+
+// --- Autonomous Agent Manager Daemon ---
+
+type AgentManagerConfig struct {
+	Enabled      bool   `json:"enabled"`
+	SystemPrompt string `json:"system_prompt"`
+	StartHour    int    `json:"start_hour"`
+	EndHour      int    `json:"end_hour"`
+}
+
+const DefaultAgentManagerSystemPrompt = `You are the Pod Agent Manager, an autonomous coordinator that monitors developer agent containers.
+Your job is to read the tmux terminal capture of a container that is currently IDLE and WAITING FOR INPUT, and decide whether it is safe and appropriate to advance it.
+
+Rules:
+1. If the agent has paused and is waiting for instructions, and it is clear what the next command should be (e.g. "continue", "yes", "proceed", running a test, or following a prompt suggestion), output the exact single-line command/response to send to the terminal. Do NOT wrap it in quotes or markdown.
+2. If the task has completed successfully, if it has failed with a terminal error, or if there is major ambiguity requiring human decision-making, output exactly "[WAIT]" (without quotes).
+3. If you decide to send a command, output ONLY that command. Do not add any conversational text, explanations, or quotes.
+
+Tmux Terminal Capture:`
+
+var (
+	agentManagerCooldown = make(map[string]time.Time)
+	agentManagerMutex    sync.Mutex
+)
+
+func readEnvFile(root string) map[string]string {
+	envPath := filepath.Join(root, ".env")
+	envMap := make(map[string]string)
+	content, err := os.ReadFile(envPath)
+	if err != nil {
+		return envMap
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			val := strings.TrimSpace(parts[1])
+			// Unquote if double or single quoted
+			if (strings.HasPrefix(val, "\"") && strings.HasSuffix(val, "\"")) ||
+				(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
+				if len(val) >= 2 {
+					val = val[1 : len(val)-1]
+				}
+			}
+			envMap[key] = val
+		}
+	}
+	return envMap
+}
+
+func updateEnvFile(root string, updates map[string]string) error {
+	envPath := filepath.Join(root, ".env")
+	content, err := os.ReadFile(envPath)
+	if err != nil {
+		// If it doesn't exist, we start fresh
+		content = []byte{}
+	}
+
+	lines := strings.Split(string(content), "\n")
+	replaced := make(map[string]bool)
+	var newLines []string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			newLines = append(newLines, line)
+			continue
+		}
+
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			if newVal, exists := updates[key]; exists {
+				newLines = append(newLines, fmt.Sprintf("%s=%q", key, newVal))
+				replaced[key] = true
+				continue
+			}
+		}
+		newLines = append(newLines, line)
+	}
+
+	// Add any updates that were not in the original file
+	for key, newVal := range updates {
+		if !replaced[key] {
+			newLines = append(newLines, fmt.Sprintf("%s=%q", key, newVal))
+		}
+	}
+
+	newContent := strings.Join(newLines, "\n")
+	if !strings.HasSuffix(newContent, "\n") {
+		newContent += "\n"
+	}
+
+	return os.WriteFile(envPath, []byte(newContent), 0644)
+}
+
+func loadAgentManagerConfig(root string) AgentManagerConfig {
+	path := filepath.Join(root, "agent_manager.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return AgentManagerConfig{
+			Enabled:      false,
+			SystemPrompt: DefaultAgentManagerSystemPrompt,
+			StartHour:    2,
+			EndHour:      13,
+		}
+	}
+	var cfg AgentManagerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return AgentManagerConfig{
+			Enabled:      false,
+			SystemPrompt: DefaultAgentManagerSystemPrompt,
+			StartHour:    2,
+			EndHour:      13,
+		}
+	}
+	return cfg
+}
+
+func saveAgentManagerConfig(root string, cfg AgentManagerConfig) error {
+	path := filepath.Join(root, "agent_manager.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+func logAgentManagerIntervention(root string, message string) {
+	path := filepath.Join(root, "agent_manager.log")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	line := fmt.Sprintf("[%s] %s\n", time.Now().Format("2006-01-02 15:04:05"), message)
+	_, _ = f.WriteString(line)
+}
+
+func getAgentManagerLogs(root string) (string, error) {
+	path := filepath.Join(root, "agent_manager.log")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > 1000 {
+		lines = lines[len(lines)-1000:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+func queryLLM(apiKey, apiURL, model, systemPrompt, userContent string) (string, error) {
+	type chatMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	type chatRequest struct {
+		Model       string        `json:"model"`
+		Messages    []chatMessage `json:"messages"`
+		Temperature float64       `json:"temperature"`
+	}
+	reqPayload := chatRequest{
+		Model: model,
+		Messages: []chatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userContent},
+		},
+		Temperature: 0.1,
+	}
+	jsonData, err := json.Marshal(reqPayload)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("HTTP status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	type chatChoice struct {
+		Message chatMessage `json:"message"`
+	}
+	type chatResponse struct {
+		Choices []chatChoice `json:"choices"`
+	}
+
+	var respPayload chatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&respPayload); err != nil {
+		return "", err
+	}
+
+	if len(respPayload.Choices) == 0 {
+		return "", fmt.Errorf("no completion choice returned")
+	}
+
+	return strings.TrimSpace(respPayload.Choices[0].Message.Content), nil
+}
+
+func startAgentManagerLoop(root string) {
+	// Give statsCache a few seconds to initialize
+	time.Sleep(5 * time.Second)
+
+	for {
+		time.Sleep(15 * time.Second)
+
+		cfg := loadAgentManagerConfig(root)
+		if !cfg.Enabled {
+			continue
+		}
+
+		localHour := time.Now().Hour()
+		if !isHourInWindow(localHour, cfg.StartHour, cfg.EndHour) {
+			continue
+		}
+
+		cacheMutex.RLock()
+		var containers []map[string]any
+		_ = json.Unmarshal(statsCache, &containers)
+		cacheMutex.RUnlock()
+
+		for _, c := range containers {
+			name := firstString(c, "Name", "Container", "ContainerName")
+			agent, instance, ok := splitManagedPodName(root, name)
+			if !ok {
+				continue
+			}
+
+			state := firstString(c, "ActivityState")
+			if state != "idle" {
+				continue
+			}
+
+			key := agent + "-" + instance
+			agentManagerMutex.Lock()
+			cooldownUntil, hasCooldown := agentManagerCooldown[key]
+			agentManagerMutex.Unlock()
+
+			if hasCooldown && time.Now().Before(cooldownUntil) {
+				continue
+			}
+
+			// Capture tmux output
+			capture, err := getPodTmuxCapture(name)
+			if err != nil {
+				logAgentManagerIntervention(root, fmt.Sprintf("Error capturing tmux for %s: %v", key, err))
+				continue
+			}
+			capture = strings.TrimSpace(capture)
+			if capture == "" || capture == "no-session" {
+				continue
+			}
+
+			// LLM details
+			apiKey := os.Getenv("OPENAI_API_KEY")
+			baseURL := os.Getenv("OPENAI_BASE_URL")
+			model := os.Getenv("POD_DEFAULT_MODEL")
+			if model == "" {
+				model = os.Getenv("DEFAULT_MODEL")
+			}
+			if model == "" {
+				model = "gpt-4o"
+			}
+
+			if apiKey == "" {
+				logAgentManagerIntervention(root, fmt.Sprintf("Error auditing %s: OPENAI_API_KEY is not set in environment", key))
+				agentManagerMutex.Lock()
+				agentManagerCooldown[key] = time.Now().Add(5 * time.Minute)
+				agentManagerMutex.Unlock()
+				continue
+			}
+
+			if baseURL == "" {
+				baseURL = "https://api.openai.com/v1"
+			}
+			apiURL := strings.TrimSuffix(baseURL, "/") + "/chat/completions"
+
+			// Query
+			response, err := queryLLM(apiKey, apiURL, model, cfg.SystemPrompt, capture)
+			if err != nil {
+				logAgentManagerIntervention(root, fmt.Sprintf("Error querying LLM for %s: %v", key, err))
+				agentManagerMutex.Lock()
+				agentManagerCooldown[key] = time.Now().Add(1 * time.Minute)
+				agentManagerMutex.Unlock()
+				continue
+			}
+
+			response = strings.TrimSpace(response)
+			if response == "" {
+				continue
+			}
+
+			if strings.ToUpper(response) == "[WAIT]" {
+				agentManagerMutex.Lock()
+				agentManagerCooldown[key] = time.Now().Add(3 * time.Minute) // 3-minute cooldown on wait
+				agentManagerMutex.Unlock()
+				continue
+			}
+
+			// Intervene
+			logAgentManagerIntervention(root, fmt.Sprintf("Intervening on %s: sending command: %q", key, response))
+			if err := sendTerminalInput(agent, instance, response); err != nil {
+				logAgentManagerIntervention(root, fmt.Sprintf("Error sending command to %s: %v", key, err))
+				agentManagerMutex.Lock()
+				agentManagerCooldown[key] = time.Now().Add(30 * time.Second)
+				agentManagerMutex.Unlock()
+			} else {
+				agentManagerMutex.Lock()
+				agentManagerCooldown[key] = time.Now().Add(45 * time.Second) // 45s to execute
+				agentManagerMutex.Unlock()
+			}
+		}
+	}
+}
+
+func isHourInWindow(hour, start, end int) bool {
+	if start <= end {
+		return hour >= start && hour <= end
+	}
+	return hour >= start || hour <= end
+}
+
+func getPodTmuxCapture(container string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	script := `if command -v tmux >/dev/null 2>&1 && tmux has-session -t bot 2>/dev/null; then tmux capture-pane -p -t bot:0.0 -S -50; else printf 'no-session\n'; fi`
+	out, err := exec.CommandContext(ctx, "podman", "exec", container, "sh", "-lc", script).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }

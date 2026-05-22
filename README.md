@@ -45,7 +45,7 @@ Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, He
 
 ## Current status
 
-The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.5"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals, browse batch runs with result summaries and exports, and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.6"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals, browse batch runs with result summaries and exports, and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
 
 ## Architecture
 
@@ -400,7 +400,7 @@ queueing (0.4, shipped) -> safe LAN sharing and agent smoke tests (0.5.x,
 current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
 1.0.
 
-### Shipped: 0.3 through 0.5.5
+### Shipped: 0.3 through 0.5.6
 
 - **0.3 dashboard awareness:** dashboard activity states, the `dev` channel,
   install-dev flow, CI on `main` and `dev`, and the first host-native Go server
@@ -420,6 +420,7 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
 - **0.5.5 dashboard ergonomics:** persistent API-key unlock, terminal request
   input and tail following, published pod ports, batch progress/log/export
   controls, and batch result summaries.
+- **0.5.6 permission template:** standardized OpenCode `dangerously-skip-permissions` configuration template.
 
 ### 0.6 — polish and demoability
 
