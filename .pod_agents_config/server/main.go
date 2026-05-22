@@ -1613,10 +1613,15 @@ func readBatchSummary(root, id string) (batchSummary, error) {
 		if total > 0 {
 			targetSummary.Percent = current * 100 / total
 		}
+		targetSummary.Results = readBatchResultSummary(filepath.Join(dir, "logs", target+".results.jsonl"))
 		summary.Targets = append(summary.Targets, targetSummary)
 		summary.Current += current
 		summary.Total += total
+		summary.Results.Processed += targetSummary.Results.Processed
+		summary.Results.Failed += targetSummary.Results.Failed
+		summary.Results.DurationSeconds += targetSummary.Results.DurationSeconds
 	}
+	summary.Results.setAverage()
 
 	switch {
 	case stopped:
@@ -1664,6 +1669,42 @@ func readBatchProgress(path string) (int, int) {
 		total = 0
 	}
 	return current, total
+}
+
+func readBatchResultSummary(path string) batchResultSummary {
+	file, err := os.Open(path)
+	if err != nil {
+		return batchResultSummary{}
+	}
+	defer file.Close()
+
+	summary := batchResultSummary{}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		var result struct {
+			ExitCode        int   `json:"exit_code"`
+			DurationSeconds int64 `json:"duration_s"`
+		}
+		if err := json.Unmarshal([]byte(scanner.Text()), &result); err != nil {
+			continue
+		}
+		summary.Processed++
+		if result.ExitCode != 0 {
+			summary.Failed++
+		}
+		if result.DurationSeconds > 0 {
+			summary.DurationSeconds += result.DurationSeconds
+		}
+	}
+	summary.setAverage()
+	return summary
+}
+
+func (summary *batchResultSummary) setAverage() {
+	if summary.Processed > 0 {
+		summary.AverageSeconds = float64(summary.DurationSeconds) / float64(summary.Processed)
+	}
 }
 
 func batchTargetStatus(dir, target string, stopped bool) string {
@@ -2438,17 +2479,26 @@ type batchSummary struct {
 	Current      int                  `json:"current"`
 	Total        int                  `json:"total"`
 	ETASeconds   int64                `json:"eta_seconds,omitempty"`
+	Results      batchResultSummary   `json:"results"`
 	Targets      []batchTargetSummary `json:"targets"`
 }
 
 type batchTargetSummary struct {
-	Target   string `json:"target"`
-	Agent    string `json:"agent,omitempty"`
-	Instance string `json:"instance,omitempty"`
-	Current  int    `json:"current"`
-	Total    int    `json:"total"`
-	Percent  int    `json:"percent"`
-	Status   string `json:"status"`
+	Target   string             `json:"target"`
+	Agent    string             `json:"agent,omitempty"`
+	Instance string             `json:"instance,omitempty"`
+	Current  int                `json:"current"`
+	Total    int                `json:"total"`
+	Percent  int                `json:"percent"`
+	Status   string             `json:"status"`
+	Results  batchResultSummary `json:"results"`
+}
+
+type batchResultSummary struct {
+	Processed       int     `json:"processed"`
+	Failed          int     `json:"failed"`
+	DurationSeconds int64   `json:"duration_seconds"`
+	AverageSeconds  float64 `json:"average_seconds"`
 }
 
 type batchLogSnapshot struct {

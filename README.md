@@ -45,7 +45,7 @@ Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, He
 
 ## Current status
 
-The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.1"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.5"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals, browse batch runs with result summaries and exports, and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
 
 ## Architecture
 
@@ -399,7 +399,7 @@ queueing (0.4, shipped) -> safe LAN sharing and agent smoke tests (0.5.x,
 current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
 1.0.
 
-### Shipped: 0.3 through 0.5.1
+### Shipped: 0.3 through 0.5.5
 
 - **0.3 dashboard awareness:** dashboard activity states, the `dev` channel,
   install-dev flow, CI on `main` and `dev`, and the first host-native Go server
@@ -416,6 +416,9 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
 - **0.5.1 agent smoke tests:** built-in OpenAI/Anthropic sham endpoints,
   `pod test <agent>`, `pod test --all`, and agent invocation fixes for the
   current plugin set.
+- **0.5.5 dashboard ergonomics:** persistent API-key unlock, terminal request
+  input and tail following, published pod ports, batch progress/log/export
+  controls, and batch result summaries.
 
 ### 0.6 — polish and demoability
 
@@ -425,8 +428,8 @@ cold to a stranger.
 - **Pod templates** for common workflows: web-app coding, repo triage, research, batch refactors. `pod start --from-template <name>`.
 - **Mobile-first PWA polish:** install prompt, offline shell, notification center, and quick actions.
 - **Notification foundation:** browser subscription storage, local delivery tests, and rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
-- **Batch dashboard page:** progress, ETA, runner logs, and stop controls are
-  live; richer result summaries remain.
+- **Batch dashboard page:** progress, ETA, result summaries, runner logs,
+  export, and stop controls are live.
 - **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
 - **Auth management polish:** HTTPS helper docs and clearer recovery docs for headless hosts.
 - **Dashboard install/update card:** local version, channel, and latest `main`/`dev` version status.
@@ -502,7 +505,7 @@ The suite covers `bash -n` syntax, `shellcheck` errors, the lib loader contract 
 
 The current roadplan lives in [docs/ROADMAP-0.3.md](docs/ROADMAP-0.3.md).
 
-**Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (for example, `0.5.1` to `0.5.2`), committing, and pushing is the release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
+**Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (for example, `0.5.5` to `0.5.6`), committing, and pushing is the release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
 
 **Branching.** Keep `main` as the stable install channel, use `dev` for small
 release-prep changes, and open named feature branches for larger work such as

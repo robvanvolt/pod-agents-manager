@@ -229,6 +229,9 @@ func TestReadBatchSummaryFromBatchFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, "progress"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	meta := strings.Join([]string{
 		"batch_id=" + id,
 		"started=2026-05-22T12:12:12+02:00",
@@ -244,6 +247,11 @@ func TestReadBatchSummaryFromBatchFiles(t *testing.T) {
 		filepath.Join(dir, "progress", "pi-dev.prog"):     "3/3\n",
 		filepath.Join(dir, "progress", "codex-main.prog"): "1/3\n",
 		filepath.Join(dir, "done.pi-dev"):                 "done\n",
+		filepath.Join(dir, "logs", "pi-dev.results.jsonl"): strings.Join([]string{
+			`{"exit_code":0,"duration_s":12}`,
+			`{"exit_code":7,"duration_s":18}`,
+			"not json",
+		}, "\n"),
 	} {
 		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 			t.Fatal(err)
@@ -262,6 +270,12 @@ func TestReadBatchSummaryFromBatchFiles(t *testing.T) {
 	}
 	if summary.Targets[1].Target != "pi-dev" || summary.Targets[1].Status != "done" {
 		t.Fatalf("unexpected sorted done target: %#v", summary.Targets)
+	}
+	if summary.Results.Processed != 2 || summary.Results.Failed != 1 || summary.Results.DurationSeconds != 30 || summary.Results.AverageSeconds != 15 {
+		t.Fatalf("unexpected batch results: %#v", summary.Results)
+	}
+	if summary.Targets[1].Results.Processed != 2 || summary.Targets[0].Results.Processed != 0 {
+		t.Fatalf("unexpected per-target results: %#v", summary.Targets)
 	}
 }
 

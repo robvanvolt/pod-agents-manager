@@ -1119,6 +1119,16 @@
       const label = `${Number(current) || 0}/${Number(total) || 0}`;
       return `<div class="batch-progress" title="${escapeHTML(label)}"><span style="width:${percent}%"></span><code>${escapeHTML(label)}</code></div>`;
     };
+    const batchResults = (results) => {
+      const processed = Number(results?.processed) || 0;
+      if (!processed) return '-';
+      const failed = Number(results?.failed) || 0;
+      const duration = Number(results?.duration_seconds) || 0;
+      const average = Number(results?.average_seconds) || duration / processed;
+      const title = `${processed} processed · ${failed} failed · ${fmtDuration(duration)} total`;
+      const outcome = failed ? `${failed} failed` : 'ok';
+      return `<div class="batch-results ${failed ? 'failed' : ''}" title="${escapeHTML(title)}"><strong>${escapeHTML(processed)}</strong><span>${escapeHTML(outcome)} · avg ${escapeHTML(fmtDuration(average))}</span></div>`;
+    };
 
     function renderBatches(batches) {
       const tbody = document.getElementById('batch-body');
@@ -1146,7 +1156,7 @@
           <td data-label="Select" class="batch-select-cell"><input type="checkbox" data-batch-select value="${escapeHTML(batch.id)}" aria-label="Select batch ${escapeHTML(batch.id)}" onchange="updateBatchExportState()"></td>
           <td data-label="Batch"><strong>${escapeHTML(batch.id)}</strong><small>${escapeHTML(started)}</small></td>
           <td data-label="Status">${batchStatus(batch.status)}</td>
-          <td data-label="Progress">${batchProgress(batch.current, batch.total, batch.total ? Math.round(batch.current * 100 / batch.total) : 0)}${eta}</td>
+          <td data-label="Progress">${batchProgress(batch.current, batch.total, batch.total ? Math.round(batch.current * 100 / batch.total) : 0)}${batchResults(batch.results)}${eta}</td>
           <td data-label="Runners"><div class="batch-runners">${targets || '-'}</div></td>
           <td data-label="Source"><code title="${escapeHTML(source)}">${escapeHTML(source)}</code></td>
           <td data-label="Actions"><div class="inline"><button type="button" class="icon-btn" title="Export batch run" aria-label="Export batch ${escapeHTML(batch.id)}" onclick="exportBatches(['${escapeHTML(batch.id)}'])">${icon('download')}</button>${stop}</div></td>
