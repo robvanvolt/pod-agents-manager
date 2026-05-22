@@ -95,6 +95,9 @@ if [ ! -f "$CONFIG_ROOT/.env" ]; then
 fi
 cp "$src_root/.pod_agents_config/.env.example" "$CONFIG_ROOT/.env.example"
 cp "$src_root/.pod_agents_config/version.conf" "$CONFIG_ROOT/version.conf"
+# Record the snapshot source so the dashboard can report the install channel
+# and future self-updates keep following dev installs without extra flags.
+printf 'repo=%s\nref=%s\n' "$REPO" "$REF" > "$CONFIG_ROOT/install-source.conf"
 merge_tree "$src_root/.pod_agents_config/agents" "$CONFIG_ROOT/agents"
 merge_tree "$src_root/.pod_agents_config/flavors" "$CONFIG_ROOT/flavors"
 merge_tree "$src_root/.pod_agents_config/volumes" "$CONFIG_ROOT/volumes"

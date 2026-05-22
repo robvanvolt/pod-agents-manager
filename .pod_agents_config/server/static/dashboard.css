@@ -380,6 +380,46 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
 .section-head .icon-btn { padding: 0; }
 .section-actions { display: inline-flex; align-items: center; gap: .35rem; }
 
+.install-status { display: grid; gap: .7rem; }
+.install-summary {
+    display: grid;
+    grid-template-columns: minmax(5rem, .7fr) minmax(5rem, .7fr) minmax(10rem, 1.6fr);
+    gap: .55rem;
+}
+.install-summary span {
+    display: grid; gap: .22rem; min-width: 0;
+    border: 1px solid rgba(148,163,184,.18); border-radius: .5rem;
+    padding: .55rem .65rem; background: rgba(15,23,42,.46);
+}
+.install-summary small {
+    color: var(--muted); font-size: .66rem; font-weight: 700;
+    letter-spacing: .04em; text-transform: uppercase;
+}
+.install-summary code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.install-latest { display: flex; flex-wrap: wrap; gap: .45rem; }
+.install-ref {
+    display: inline-grid; grid-template-columns: auto auto auto;
+    align-items: center; gap: .42rem;
+    min-height: 1.9rem;
+    border: 1px solid rgba(148,163,184,.2); border-radius: .5rem;
+    padding: .32rem .5rem; background: rgba(15,23,42,.56);
+}
+.install-ref > span {
+    color: var(--muted); font-size: .68rem; font-weight: 700;
+    letter-spacing: .04em; text-transform: uppercase;
+}
+.install-ref em {
+    border: 1px solid rgba(148,163,184,.2); border-radius: 999px;
+    padding: .12rem .36rem; color: #cbd5e1;
+    font-size: .64rem; font-style: normal; text-transform: uppercase;
+}
+.install-ref em.current { border-color: rgba(52,211,153,.4); color: #bbf7d0; }
+.install-ref em.different { border-color: rgba(251,191,36,.36); color: #fde68a; }
+.install-status p {
+    margin: 0; color: var(--muted); font-size: .78rem;
+}
+.install-fetch-error { color: #fecaca; font-size: .78rem; }
+
 .batch-card { margin-top: 1rem; }
 .batch-card td { vertical-align: top; }
 .batch-select-head, .batch-select-cell { width: 2.3rem; text-align: center; }
@@ -502,6 +542,7 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     .table-card .inline button { flex: 1 1 4.2rem; min-width: 0; }
     .table-card .inline .icon-btn { flex: 0 0 2.2rem; width: 2.2rem; }
     .batch-card td[data-label="Source"] code { max-width: 100%; }
+    .install-summary { grid-template-columns: 1fr; }
     .batch-runners { min-width: 0; }
     .batch-runner {
         grid-template-columns: minmax(0, 1fr) auto;

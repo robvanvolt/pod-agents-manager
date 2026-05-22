@@ -78,13 +78,22 @@ EOF
 
     _pod_fetch_repo_snapshot() {
         local tmp_dir="$1"
-        local repo="${POD_AGENTS_REPO:-robvanvolt/pod-agents-manager}"
-        local ref="${POD_AGENTS_REF:-main}"
+        local install_source="$config_dir_root/install-source.conf"
+        local saved_repo=""
+        local saved_ref=""
+        local repo=""
+        local ref=""
+        [ -f "$install_source" ] && saved_repo=$(sed -n 's/^repo=//p' "$install_source" | head -n 1)
+        [ -f "$install_source" ] && saved_ref=$(sed -n 's/^ref=//p' "$install_source" | head -n 1)
+        repo="${POD_AGENTS_REPO:-${saved_repo:-robvanvolt/pod-agents-manager}}"
+        ref="${POD_AGENTS_REF:-${saved_ref:-main}}"
         local archive_url="${POD_AGENTS_ARCHIVE_URL:-https://codeload.github.com/${repo}/tar.gz/refs/heads/${ref}}"
 
         _pod_require_cmd curl || return 1
         _pod_require_cmd tar || return 1
 
+        pod_snapshot_repo="$repo"
+        pod_snapshot_ref="$ref"
         curl -fsSL "$archive_url" | tar -xzf - -C "$tmp_dir" || return 1
         find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n 1
     }
@@ -102,6 +111,9 @@ EOF
         [ -f "$config_dir_root/.env" ] || cp "$src_root/.pod_agents_config/.env.example" "$config_dir_root/.env"
         cp "$src_root/.pod_agents_config/.env.example" "$config_dir_root/.env.example"
         cp "$src_root/.pod_agents_config/version.conf" "$config_dir_root/version.conf"
+        printf 'repo=%s\nref=%s\n' \
+            "${pod_snapshot_repo:-robvanvolt/pod-agents-manager}" \
+            "${pod_snapshot_ref:-main}" > "$config_dir_root/install-source.conf"
         _pod_merge_tree "$src_root/.pod_agents_config/agents" "$config_dir_agents"
         _pod_merge_tree "$src_root/.pod_agents_config/flavors" "$config_dir_flavors"
         _pod_merge_tree "$src_root/.pod_agents_config/volumes" "$config_dir_volumes"

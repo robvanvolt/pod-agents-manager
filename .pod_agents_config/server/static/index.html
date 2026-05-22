@@ -144,6 +144,18 @@
       </form>
     </div>
 
+    <div class="card install-card">
+      <div class="section-head">
+        <h2>Install status</h2>
+        <div class="section-actions">
+          <button type="button" class="icon-btn" title="Refresh install status" aria-label="Refresh install status" onclick="fetchUpdateStatus(true)"><span data-icon="refresh"></span></button>
+        </div>
+      </div>
+      <div id="install-status" class="install-status" aria-live="polite">
+        Loading install status...
+      </div>
+    </div>
+
     <div class="card table-card batch-card">
       <div class="section-head">
         <h2>Batch runs</h2>
@@ -309,6 +321,47 @@
         setChip('chip-host', data.hostname || null);
         setChip('chip-ip', (data.ips || [])[0] || null);
       } catch (_) {}
+    }
+
+    const updateStateLabel = (state) => {
+      if (state === 'current') return 'current';
+      if (state === 'different') return 'differs';
+      return 'unknown';
+    };
+
+    function renderUpdateStatus(data) {
+      const target = document.getElementById('install-status');
+      if (!target) return;
+      const source = data?.source || {};
+      const command = String(data?.command || 'pod');
+      const latest = Array.isArray(data?.latest) ? data.latest : [];
+      const rows = latest.map(item => {
+        const title = item.error ? ` title="${escapeHTML(item.error)}"` : '';
+        return `<div class="install-ref"${title}><span>${escapeHTML(item.ref || '-')}</span><code>${escapeHTML(item.version || 'unknown')}</code><em class="${escapeHTML(item.state || 'unknown')}">${escapeHTML(updateStateLabel(item.state))}</em></div>`;
+      }).join('');
+      target.innerHTML = `
+        <div class="install-summary">
+          <span><small>Local</small><code>${escapeHTML(data?.version || 'unknown')}</code></span>
+          <span><small>Channel</small><code>${escapeHTML(source.ref || 'main')}</code></span>
+          <span><small>Repository</small><code>${escapeHTML(source.repo || '-')}</code></span>
+        </div>
+        <div class="install-latest" aria-label="Latest remote versions">${rows || '<span class="install-fetch-error">No remote versions found.</span>'}</div>
+        <p>Update with <code>${escapeHTML(command)} self-update</code>.</p>
+      `;
+    }
+
+    async function fetchUpdateStatus(refresh = false) {
+      if (authState.role !== 'operator') return;
+      const target = document.getElementById('install-status');
+      try {
+        const res = await fetch(refresh ? '/api/update-status?refresh=1' : '/api/update-status');
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || res.statusText);
+        renderUpdateStatus(JSON.parse(text));
+      } catch (err) {
+        if (target) target.innerHTML = '<span class="install-fetch-error">Could not load install status.</span>';
+        console.error('failed to load install status:', err);
+      }
     }
 
     async function fetchAuthStatus() {
@@ -1284,6 +1337,7 @@
       fetchInfo();
       fetchStats();
       loadAgentOptions();
+      fetchUpdateStatus();
       loadBatches();
     }
 

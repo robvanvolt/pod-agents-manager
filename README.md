@@ -251,6 +251,7 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /` | Single-page dashboard |
 | `GET /api/stats` | Operator-only cached `podman stats --all --no-stream` JSON, refreshed every 3s |
 | `GET /api/info` | Operator-only hostname, LAN IPs, server time |
+| `GET /api/update-status` | Operator-only install source and cached latest `main` / `dev` versions |
 | `GET /api/auth/status` | Current dashboard role and passkey readiness |
 | `POST /api/auth/login` | Unlock the dashboard with the local API key or a rotated bootstrap token |
 | `POST /api/auth/logout` | End the operator session |
@@ -432,7 +433,7 @@ cold to a stranger.
   export, and stop controls are live.
 - **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
 - **Auth management polish:** HTTPS helper docs and clearer recovery docs for headless hosts.
-- **Dashboard install/update card:** local version, channel, and latest `main`/`dev` version status.
+- **Dashboard install/update card:** local version, saved channel, and cached latest `main`/`dev` version status are live.
 - **Per-pod notes, tags, and favorite workspaces** stored beside each workspace.
 - **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.
 

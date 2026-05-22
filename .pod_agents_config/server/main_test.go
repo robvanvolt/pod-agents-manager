@@ -47,6 +47,50 @@ func TestFirstPercent(t *testing.T) {
 	}
 }
 
+func TestParsePodVersion(t *testing.T) {
+	got := parsePodVersion([]byte("# manager\nPOD_AGENTS_VERSION=\"0.5.5\"\n"))
+	if got != "0.5.5" {
+		t.Fatalf("got %q, want 0.5.5", got)
+	}
+}
+
+func TestReadInstallSource(t *testing.T) {
+	root := t.TempDir()
+	if got := readInstallSource(root); got.Repo != "robvanvolt/pod-agents-manager" || got.Ref != "main" {
+		t.Fatalf("unexpected fallback source: %#v", got)
+	}
+	data := "repo=example/pod-fork\nref=dev\n"
+	if err := os.WriteFile(filepath.Join(root, "install-source.conf"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readInstallSource(root); got.Repo != "example/pod-fork" || got.Ref != "dev" {
+		t.Fatalf("unexpected saved source: %#v", got)
+	}
+}
+
+func TestReadInstallSourceRejectsUnsafeValues(t *testing.T) {
+	root := t.TempDir()
+	data := "repo=https://example.invalid/repo\nref=../main\n"
+	if err := os.WriteFile(filepath.Join(root, "install-source.conf"), []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := readInstallSource(root); got.Repo != "robvanvolt/pod-agents-manager" || got.Ref != "main" {
+		t.Fatalf("unsafe values changed source: %#v", got)
+	}
+}
+
+func TestUpdateVersionState(t *testing.T) {
+	if got := updateVersionState("0.5.5", "0.5.5"); got != "current" {
+		t.Fatalf("same version got %q, want current", got)
+	}
+	if got := updateVersionState("0.5.5", "0.5.6"); got != "different" {
+		t.Fatalf("new remote got %q, want different", got)
+	}
+	if got := updateVersionState("unknown", "0.5.6"); got != "unknown" {
+		t.Fatalf("unknown local got %q, want unknown", got)
+	}
+}
+
 func TestParsePublishedPorts(t *testing.T) {
 	got := parsePublishedPorts(`
 f99c7164ed6a4ae1f05aa2ad1f08a70bb8dcb883e663ab34c497a53ec4f704d8
