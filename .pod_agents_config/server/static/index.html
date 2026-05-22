@@ -103,7 +103,7 @@
           <p id="log-meta">waiting for logs</p>
         </div>
         <div class="log-head-actions">
-          <button type="button" title="Refresh journal" aria-label="Refresh journal" onclick="loadLogs()">refresh</button>
+          <button type="button" class="icon-btn" title="Refresh journal" aria-label="Refresh journal" onclick="loadLogs()"><span data-icon="refresh"></span></button>
           <button type="button" aria-label="Close journal" onclick="closeLogs()">×</button>
         </div>
       </div>
@@ -147,16 +147,20 @@
     <div class="card table-card batch-card">
       <div class="section-head">
         <h2>Batch runs</h2>
-        <button type="button" title="Refresh batch runs" onclick="loadBatches()">refresh</button>
+        <div class="section-actions">
+          <button type="button" id="batch-export-button" class="icon-btn" title="Export selected batch runs" aria-label="Export selected batch runs" onclick="exportSelectedBatches()" disabled><span data-icon="download"></span></button>
+          <button type="button" class="icon-btn" title="Refresh batch runs" aria-label="Refresh batch runs" onclick="loadBatches()"><span data-icon="refresh"></span></button>
+        </div>
       </div>
       <table>
         <thead>
           <tr>
+            <th class="batch-select-head"><input id="batch-select-all" type="checkbox" aria-label="Select all visible batch runs" onchange="selectVisibleBatches(this.checked)"></th>
             <th>Batch</th><th>Status</th><th>Progress</th><th>Runners</th><th>Source</th><th>Actions</th>
           </tr>
         </thead>
         <tbody id="batch-body">
-          <tr><td colspan="6">Loading batches...</td></tr>
+          <tr><td colspan="7">Loading batches...</td></tr>
         </tbody>
       </table>
     </div>
@@ -266,16 +270,28 @@
       }).join('');
       return `<div class="port-links">${chips}</div>`;
     };
-    const binocularIcon = () => `
-      <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">
-        <path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path>
-        <path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path>
-        <path d="M9 5h6"></path>
-        <path d="M10 8h4"></path>
-        <circle cx="7" cy="16" r="4"></circle>
-        <circle cx="17" cy="16" r="4"></circle>
-        <path d="M11 16h2"></path>
-      </svg>`;
+    const icon = (name) => {
+      const paths = {
+        binoculars: '<path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path><path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path><path d="M9 5h6"></path><path d="M10 8h4"></path><circle cx="7" cy="16" r="4"></circle><circle cx="17" cy="16" r="4"></circle><path d="M11 16h2"></path>',
+        check: '<path d="M20 6 9 17l-5-5"></path>',
+        download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path>',
+        fileText: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h8"></path>',
+        message: '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8A8.5 8.5 0 0 1 8.7 4a8.4 8.4 0 0 1 3.8-.9h.5"></path><path d="M19 3v6"></path><path d="M16 6h6"></path>',
+        play: '<path d="m8 5 11 7-11 7z"></path>',
+        refresh: '<path d="M21 12a9 9 0 0 0-15.1-6.6L3 8"></path><path d="M3 3v5h5"></path><path d="M3 12a9 9 0 0 0 15.1 6.6L21 16"></path><path d="M16 16h5v5"></path>',
+        restart: '<path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path>',
+        send: '<path d="m22 2-7 20-4-9-9-4z"></path><path d="M22 2 11 13"></path>',
+        square: '<rect x="5" y="5" width="14" height="14" rx="1"></rect>',
+        trash: '<path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="m19 6-1 15H6L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>',
+        alert: '<path d="m10.3 2.9-8.2 14a2 2 0 0 0 1.7 3h16.4a2 2 0 0 0 1.7-3l-8.2-14a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path>',
+        dot: '<circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2"></circle>',
+      };
+      return `<svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16">${paths[name] || paths.dot}</svg>`;
+    };
+    const buttonIcon = (name, label) => `<span class="sr-only">${escapeHTML(label)}</span>${icon(name)}`;
+    document.querySelectorAll('[data-icon]').forEach(el => {
+      el.innerHTML = icon(el.dataset.icon);
+    });
     function setChip(id, value) {
       const chip = document.getElementById(id);
       const val = document.getElementById(`${id}-val`);
@@ -569,14 +585,14 @@
         const canWrite = authState.role === 'operator';
         const actions = (agent && instance) ? `
           <div class="inline">
-            <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View terminal" aria-label="View terminal for ${agent}-${instance}" onclick="openTerminal('${agent}','${instance}')">${binocularIcon()}</button>
-            <button data-operator-action ${canWrite ? '' : 'disabled'} onclick="openLogs('${agent}','${instance}')">logs</button>
-            <button data-write-action data-disabled-reason="${canRequest ? '' : 'terminal'}" ${canWrite && canRequest ? '' : 'disabled'} title="${canRequest ? 'Send a request into the waiting terminal' : 'agent terminal is not waiting for input'}" onclick="openRequestDialog('${agent}','${instance}')">request</button>
-            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('restart','${agent}','${instance}')">restart</button>
-            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('stop','${agent}','${instance}')">stop</button>
-            <button data-write-action ${canWrite ? '' : 'disabled'} onclick="sendAction('start','${agent}','${instance}')">start</button>
-            <button data-write-action data-disabled-reason="${canInstruct ? '' : 'idle'}" ${canWrite && canInstruct ? '' : 'disabled'} title="${canInstruct ? '' : 'pod is not idle'}" onclick="sendInstruction('${agent}','${instance}')">instruct</button>
-            <button data-write-action ${canWrite ? '' : 'disabled'} class="danger" onclick="confirmDelete('${agent}','${instance}')">delete</button>
+            <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View terminal" aria-label="View terminal for ${agent}-${instance}" onclick="openTerminal('${agent}','${instance}')">${icon('binoculars')}</button>
+            <button data-operator-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="View journal" aria-label="View journal for ${agent}-${instance}" onclick="openLogs('${agent}','${instance}')">${icon('fileText')}</button>
+            <button data-write-action class="icon-btn" data-disabled-reason="${canRequest ? '' : 'terminal'}" ${canWrite && canRequest ? '' : 'disabled'} title="${canRequest ? 'Send request' : 'Agent terminal is not waiting for input'}" aria-label="Send request to ${agent}-${instance}" onclick="openRequestDialog('${agent}','${instance}')">${icon('message')}</button>
+            <button data-write-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="Restart pod" aria-label="Restart ${agent}-${instance}" onclick="sendAction('restart','${agent}','${instance}')">${icon('restart')}</button>
+            <button data-write-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="Stop pod" aria-label="Stop ${agent}-${instance}" onclick="sendAction('stop','${agent}','${instance}')">${icon('square')}</button>
+            <button data-write-action class="icon-btn" ${canWrite ? '' : 'disabled'} title="Start pod" aria-label="Start ${agent}-${instance}" onclick="sendAction('start','${agent}','${instance}')">${icon('play')}</button>
+            <button data-write-action class="icon-btn" data-disabled-reason="${canInstruct ? '' : 'idle'}" ${canWrite && canInstruct ? '' : 'disabled'} title="${canInstruct ? 'Instruct idle pod' : 'Pod is not idle'}" aria-label="Instruct ${agent}-${instance}" onclick="sendInstruction('${agent}','${instance}')">${icon('send')}</button>
+            <button data-write-action class="icon-btn danger" ${canWrite ? '' : 'disabled'} title="Delete pod" aria-label="Delete ${agent}-${instance}" onclick="confirmDelete('${agent}','${instance}')">${icon('trash')}</button>
           </div>` : '';
         return `<tr>
           <td data-label="ID"><code>${id}</code></td>
@@ -1062,7 +1078,16 @@
       }
     }
 
-    const batchStatus = (status) => `<span class="batch-status ${escapeHTML(status || 'interrupted')}">${escapeHTML(status || 'interrupted')}</span>`;
+    const batchStatusIcon = (status) => ({
+      done: 'check',
+      running: 'dot',
+      stopped: 'square',
+      interrupted: 'alert',
+    })[status] || 'alert';
+    const batchStatus = (status) => {
+      const label = String(status || 'interrupted');
+      return `<span class="batch-status ${escapeHTML(label)}" title="${escapeHTML(label)}" aria-label="${escapeHTML(label)}">${buttonIcon(batchStatusIcon(label), label)}</span>`;
+    };
     const batchProgress = (current, total, pct) => {
       const percent = Math.max(0, Math.min(Number(pct) || 0, 100));
       const label = `${Number(current) || 0}/${Number(total) || 0}`;
@@ -1073,7 +1098,8 @@
       const tbody = document.getElementById('batch-body');
       if (!tbody) return;
       if (!Array.isArray(batches) || batches.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">No batch runs yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">No batch runs yet</td></tr>';
+        updateBatchExportState();
         return;
       }
       tbody.innerHTML = batches.map(batch => {
@@ -1082,24 +1108,70 @@
             <strong>${escapeHTML(target.target)}</strong>
             ${batchStatus(target.status)}
             ${batchProgress(target.current, target.total, target.percent)}
-            <button type="button" onclick="openBatchLog('${escapeHTML(batch.id)}','${escapeHTML(target.target)}')">logs</button>
+            <button type="button" class="icon-btn" title="View runner log" aria-label="View ${escapeHTML(target.target)} log" onclick="openBatchLog('${escapeHTML(batch.id)}','${escapeHTML(target.target)}')">${icon('fileText')}</button>
           </div>`).join('');
         const eta = batch.eta_seconds ? `<span>ETA ${escapeHTML(fmtDuration(batch.eta_seconds))}</span>` : '';
         const stop = batch.status === 'running'
-          ? `<button type="button" data-write-action onclick="stopBatch('${escapeHTML(batch.id)}')">stop</button>`
+          ? `<button type="button" class="icon-btn" data-write-action title="Stop batch" aria-label="Stop batch ${escapeHTML(batch.id)}" onclick="stopBatch('${escapeHTML(batch.id)}')">${icon('square')}</button>`
           : '';
         const started = batch.started_at ? new Date(batch.started_at).toLocaleString() : 'unknown';
         const source = batch.source || '-';
         return `<tr>
+          <td data-label="Select" class="batch-select-cell"><input type="checkbox" data-batch-select value="${escapeHTML(batch.id)}" aria-label="Select batch ${escapeHTML(batch.id)}" onchange="updateBatchExportState()"></td>
           <td data-label="Batch"><strong>${escapeHTML(batch.id)}</strong><small>${escapeHTML(started)}</small></td>
           <td data-label="Status">${batchStatus(batch.status)}</td>
           <td data-label="Progress">${batchProgress(batch.current, batch.total, batch.total ? Math.round(batch.current * 100 / batch.total) : 0)}${eta}</td>
           <td data-label="Runners"><div class="batch-runners">${targets || '-'}</div></td>
           <td data-label="Source"><code title="${escapeHTML(source)}">${escapeHTML(source)}</code></td>
-          <td data-label="Actions">${stop || '-'}</td>
+          <td data-label="Actions"><div class="inline"><button type="button" class="icon-btn" title="Export batch run" aria-label="Export batch ${escapeHTML(batch.id)}" onclick="exportBatches(['${escapeHTML(batch.id)}'])">${icon('download')}</button>${stop}</div></td>
         </tr>`;
       }).join('');
+      updateBatchExportState();
       renderAuthState();
+    }
+
+    function selectedBatchIDs() {
+      return Array.from(document.querySelectorAll('[data-batch-select]:checked')).map(el => el.value);
+    }
+
+    function updateBatchExportState() {
+      const selected = selectedBatchIDs();
+      const boxes = Array.from(document.querySelectorAll('[data-batch-select]'));
+      const button = document.getElementById('batch-export-button');
+      const all = document.getElementById('batch-select-all');
+      if (button) {
+        button.disabled = selected.length === 0;
+        button.title = selected.length ? `Export ${selected.length} selected batch run${selected.length === 1 ? '' : 's'}` : 'Select batch runs to export';
+      }
+      if (all) {
+        all.checked = boxes.length > 0 && selected.length === boxes.length;
+        all.indeterminate = selected.length > 0 && selected.length < boxes.length;
+      }
+    }
+
+    function selectVisibleBatches(checked) {
+      document.querySelectorAll('[data-batch-select]').forEach(el => { el.checked = checked; });
+      updateBatchExportState();
+    }
+
+    function exportSelectedBatches() {
+      exportBatches(selectedBatchIDs());
+    }
+
+    function exportBatches(ids) {
+      if (!Array.isArray(ids) || ids.length === 0) {
+        showToast('Select at least one batch run to export', true);
+        return;
+      }
+      const params = new URLSearchParams();
+      ids.forEach(id => params.append('batch', id));
+      const link = document.createElement('a');
+      link.href = `/api/batches/export?${params.toString()}`;
+      link.download = '';
+      link.hidden = true;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     }
 
     async function loadBatches() {

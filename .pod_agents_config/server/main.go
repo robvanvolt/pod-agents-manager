@@ -1,6 +1,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -555,6 +556,30 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(snapshot)
+	})
+
+	mux.HandleFunc("/api/batches/export", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
+		ids, err := batchExportIDsFromRequest(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := validateBatchExport(root, ids); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, batchExportFilename(ids)))
+		if err := writeBatchExport(w, root, ids); err != nil {
+			log.Printf("batch export failed: %v", err)
+		}
 	})
 
 	mux.HandleFunc("/api/batches/stop", func(w http.ResponseWriter, r *http.Request) {
@@ -1672,6 +1697,97 @@ func batchLineLimitFromRequest(r *http.Request) int {
 		return 320
 	}
 	return lines
+}
+
+func batchExportIDsFromRequest(r *http.Request) ([]string, error) {
+	raw := append([]string{}, r.URL.Query()["batch"]...)
+	if batches := strings.TrimSpace(r.URL.Query().Get("batches")); batches != "" {
+		raw = append(raw, strings.Split(batches, ",")...)
+	}
+	seen := map[string]bool{}
+	ids := []string{}
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if !validIdent(id) {
+			return nil, fmt.Errorf("invalid batch")
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("select at least one batch")
+	}
+	if len(ids) > 40 {
+		return nil, fmt.Errorf("too many batches selected")
+	}
+	return ids, nil
+}
+
+func batchExportFilename(ids []string) string {
+	if len(ids) == 1 {
+		return "pod-batch-" + ids[0] + ".zip"
+	}
+	return fmt.Sprintf("pod-batches-%d.zip", len(ids))
+}
+
+func validateBatchExport(root string, ids []string) error {
+	for _, id := range ids {
+		info, err := os.Stat(filepath.Join(batchRoot(root), id))
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("batch not found: %s", id)
+		}
+	}
+	return nil
+}
+
+func writeBatchExport(w io.Writer, root string, ids []string) error {
+	if err := validateBatchExport(root, ids); err != nil {
+		return err
+	}
+	archive := zip.NewWriter(w)
+	for _, id := range ids {
+		dir := filepath.Join(batchRoot(root), id)
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !info.Mode().IsRegular() {
+				return nil
+			}
+			rel, err := filepath.Rel(batchRoot(root), path)
+			if err != nil {
+				return err
+			}
+			header, err := zip.FileInfoHeader(info)
+			if err != nil {
+				return err
+			}
+			header.Name = filepath.ToSlash(filepath.Join("batch", rel))
+			header.Method = zip.Deflate
+			entry, err := archive.CreateHeader(header)
+			if err != nil {
+				return err
+			}
+			file, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			_, copyErr := io.Copy(entry, file)
+			closeErr := file.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			return closeErr
+		})
+		if err != nil {
+			_ = archive.Close()
+			return err
+		}
+	}
+	return archive.Close()
 }
 
 func readBatchLog(root, id, target string, lines int) (batchLogSnapshot, error) {

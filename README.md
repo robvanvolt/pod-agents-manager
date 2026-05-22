@@ -261,6 +261,7 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `GET /api/agents` | Operator-only available agents, flavors, volumes, bases |
 | `GET /api/batches` | Operator-only batch run progress summaries from local batch state |
 | `GET /api/batches/logs` | Operator-only bounded log tail for one batch runner |
+| `GET /api/batches/export` | Download one or more selected batch state directories as a zip |
 | `POST /api/batches/stop` | Stop a running batch and its current runner processes |
 | `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
 | `GET /api/terminal/ws` | Operator-only WebSocket stream for live xterm terminal output and input |
@@ -347,8 +348,9 @@ pod batch stop <id>                         # SIGTERM all runners for a batch
 ```
 
 State lives at `~/.pod_agents_config/batch/<id>/` (input copy, meta, runners, pids, per-pod progress + logs, completion markers). Runners are detached with `nohup` and survive the parent shell exiting.
-The dashboard batch table reads that same state, tails each runner log, and can
-signal a running batch to stop without SSHing into the host.
+The dashboard batch table reads that same state, tails each runner log, exports
+one or several selected batch state directories as a zip, and can signal a
+running batch to stop without SSHing into the host.
 
 ## Agent inbox
 

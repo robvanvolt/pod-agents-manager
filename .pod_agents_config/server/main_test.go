@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -274,6 +276,59 @@ func TestTailTextFileLimitsLinesAndStripsANSI(t *testing.T) {
 	}
 	if got != "three\nfour" {
 		t.Fatalf("got %q, want last two plain lines", got)
+	}
+}
+
+func TestBatchExportIDsFromRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/batches/export?batch=first&batch=second&batches=second,third", nil)
+	ids, err := batchExportIDsFromRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ids, ","); got != "first,second,third" {
+		t.Fatalf("got %q, want unique ordered batch ids", got)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/batches/export?batch=../bad", nil)
+	if _, err := batchExportIDsFromRequest(req); err == nil {
+		t.Fatal("expected invalid batch export id to fail")
+	}
+}
+
+func TestWriteBatchExportArchivesSelectedRunFiles(t *testing.T) {
+	root := t.TempDir()
+	for path, data := range map[string]string{
+		filepath.Join(root, "batch", "batch-one", "meta.conf"):      "batch_id=batch-one\n",
+		filepath.Join(root, "batch", "batch-one", "logs", "pi.log"): "hello\n",
+		filepath.Join(root, "batch", "batch-two", "meta.conf"):      "batch_id=batch-two\n",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out bytes.Buffer
+	if err := writeBatchExport(&out, root, []string{"batch-one"}); err != nil {
+		t.Fatal(err)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(out.Bytes()), int64(out.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, file := range archive.File {
+		names[file.Name] = true
+	}
+	for _, name := range []string{"batch/batch-one/meta.conf", "batch/batch-one/logs/pi.log"} {
+		if !names[name] {
+			t.Fatalf("archive missing %q: %#v", name, names)
+		}
+	}
+	if names["batch/batch-two/meta.conf"] {
+		t.Fatalf("archive included unselected run: %#v", names)
 	}
 }
 
