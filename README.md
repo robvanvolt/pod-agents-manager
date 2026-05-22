@@ -259,6 +259,9 @@ Auto-discovered the next time you run `pod`. No restart, no registry, no boilerp
 | `POST /api/auth/passkey/login/options` | WebAuthn login options for registered passkeys |
 | `POST /api/auth/passkey/login/verify` | Verify a passkey assertion and create an operator session |
 | `GET /api/agents` | Operator-only available agents, flavors, volumes, bases |
+| `GET /api/batches` | Operator-only batch run progress summaries from local batch state |
+| `GET /api/batches/logs` | Operator-only bounded log tail for one batch runner |
+| `POST /api/batches/stop` | Stop a running batch and its current runner processes |
 | `GET /api/terminal` | Operator-only capture of a pod's `bot` tmux pane for the dashboard overlay |
 | `GET /api/terminal/ws` | Operator-only WebSocket stream for live xterm terminal output and input |
 | `POST /api/terminal/start` | Start the pod's detached `bot` tmux agent session |
@@ -344,6 +347,8 @@ pod batch stop <id>                         # SIGTERM all runners for a batch
 ```
 
 State lives at `~/.pod_agents_config/batch/<id>/` (input copy, meta, runners, pids, per-pod progress + logs, completion markers). Runners are detached with `nohup` and survive the parent shell exiting.
+The dashboard batch table reads that same state, tails each runner log, and can
+signal a running batch to stop without SSHing into the host.
 
 ## Agent inbox
 
@@ -418,7 +423,8 @@ cold to a stranger.
 - **Pod templates** for common workflows: web-app coding, repo triage, research, batch refactors. `pod start --from-template <name>`.
 - **Mobile-first PWA polish:** install prompt, offline shell, notification center, and quick actions.
 - **Notification foundation:** browser subscription storage, local delivery tests, and rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
-- **Batch dashboard page:** progress, ETA, logs, stop controls, and result summaries.
+- **Batch dashboard page:** progress, ETA, runner logs, and stop controls are
+  live; richer result summaries remain.
 - **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
 - **Auth management polish:** HTTPS helper docs and clearer recovery docs for headless hosts.
 - **Dashboard install/update card:** local version, channel, and latest `main`/`dev` version status.

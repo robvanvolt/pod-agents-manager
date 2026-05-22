@@ -143,6 +143,23 @@
         <pre class="out" id="f-out"></pre>
       </form>
     </div>
+
+    <div class="card table-card batch-card">
+      <div class="section-head">
+        <h2>Batch runs</h2>
+        <button type="button" title="Refresh batch runs" onclick="loadBatches()">refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Batch</th><th>Status</th><th>Progress</th><th>Runners</th><th>Source</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="batch-body">
+          <tr><td colspan="6">Loading batches...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
   </div>
 
@@ -152,7 +169,7 @@
     let authState = { role: 'viewer', authenticated: false };
     let passkeyCache = [];
     let terminalState = { agent: '', instance: '', socket: null, connectTimer: null, followTail: true, term: null, rendering: false };
-    let logState = { agent: '', instance: '' };
+    let logState = { kind: 'pod', agent: '', instance: '', batch: '', target: '' };
     let requestState = { agent: '', instance: '' };
 
     const fmtBytes = (raw) => {
@@ -211,6 +228,16 @@
     const shortID = (value) => {
       const text = String(value || '');
       return text.length > 14 ? `${text.slice(0, 8)}…${text.slice(-6)}` : text;
+    };
+    const fmtDuration = (raw) => {
+      const seconds = Math.max(0, Math.round(Number(raw) || 0));
+      if (!seconds) return '';
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const rest = seconds % 60;
+      if (hours) return `${hours}h ${minutes}m`;
+      if (minutes) return `${minutes}m ${rest}s`;
+      return `${rest}s`;
     };
     const portURLHost = (hostIP) => {
       const binding = String(hostIP || '').trim().replace(/^\[(.*)\]$/, '$1').toLowerCase();
@@ -602,11 +629,29 @@
     function openLogs(agent, instance) {
       const dialog = document.getElementById('log-dialog');
       if (!dialog) return;
+      logState.kind = 'pod';
       logState.agent = agent;
       logState.instance = instance;
+      logState.batch = '';
+      logState.target = '';
       document.getElementById('log-title').textContent = `${agent}-${instance} journal`;
       document.getElementById('log-meta').textContent = 'loading journal…';
       document.getElementById('log-output').textContent = 'Loading journal…';
+      dialog.showModal();
+      loadLogs();
+    }
+
+    function openBatchLog(batch, target) {
+      const dialog = document.getElementById('log-dialog');
+      if (!dialog) return;
+      logState.kind = 'batch';
+      logState.batch = batch;
+      logState.target = target;
+      logState.agent = '';
+      logState.instance = '';
+      document.getElementById('log-title').textContent = `${target} batch log`;
+      document.getElementById('log-meta').textContent = batch;
+      document.getElementById('log-output').textContent = 'Loading batch log...';
       dialog.showModal();
       loadLogs();
     }
@@ -666,6 +711,10 @@
     }
 
     async function loadLogs() {
+      if (logState.kind === 'batch') {
+        await loadBatchLog();
+        return;
+      }
       if (!logState.agent || !logState.instance) return;
       const meta = document.getElementById('log-meta');
       const output = document.getElementById('log-output');
@@ -692,6 +741,37 @@
         output.scrollTop = output.scrollHeight;
       } catch (err) {
         meta.textContent = 'journal failed';
+        output.textContent = 'Network error: ' + err;
+      }
+    }
+
+    async function loadBatchLog() {
+      if (!logState.batch || !logState.target) return;
+      const meta = document.getElementById('log-meta');
+      const output = document.getElementById('log-output');
+      await fetchAuthStatus();
+      if (authState.role !== 'operator') {
+        meta.textContent = 'batch log locked';
+        output.textContent = 'Unlock the dashboard first.';
+        return;
+      }
+      meta.textContent = 'loading batch log...';
+      const params = new URLSearchParams({ batch: logState.batch, target: logState.target });
+      try {
+        const res = await fetch(`/api/batches/logs?${params.toString()}`);
+        const text = await res.text();
+        if (!res.ok) {
+          meta.textContent = 'batch log failed';
+          output.textContent = text;
+          return;
+        }
+        const data = JSON.parse(text);
+        const captured = data.captured_at ? new Date(data.captured_at).toLocaleTimeString() : 'now';
+        meta.textContent = `${data.batch_id} · ${data.target} · last ${data.lines || '?'} lines · ${captured}`;
+        output.textContent = data.output || '(no batch log output)';
+        output.scrollTop = output.scrollHeight;
+      } catch (err) {
+        meta.textContent = 'batch log failed';
         output.textContent = 'Network error: ' + err;
       }
     }
@@ -982,6 +1062,74 @@
       }
     }
 
+    const batchStatus = (status) => `<span class="batch-status ${escapeHTML(status || 'interrupted')}">${escapeHTML(status || 'interrupted')}</span>`;
+    const batchProgress = (current, total, pct) => {
+      const percent = Math.max(0, Math.min(Number(pct) || 0, 100));
+      const label = `${Number(current) || 0}/${Number(total) || 0}`;
+      return `<div class="batch-progress" title="${escapeHTML(label)}"><span style="width:${percent}%"></span><code>${escapeHTML(label)}</code></div>`;
+    };
+
+    function renderBatches(batches) {
+      const tbody = document.getElementById('batch-body');
+      if (!tbody) return;
+      if (!Array.isArray(batches) || batches.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6">No batch runs yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = batches.map(batch => {
+        const targets = (batch.targets || []).map(target => `
+          <div class="batch-runner">
+            <strong>${escapeHTML(target.target)}</strong>
+            ${batchStatus(target.status)}
+            ${batchProgress(target.current, target.total, target.percent)}
+            <button type="button" onclick="openBatchLog('${escapeHTML(batch.id)}','${escapeHTML(target.target)}')">logs</button>
+          </div>`).join('');
+        const eta = batch.eta_seconds ? `<span>ETA ${escapeHTML(fmtDuration(batch.eta_seconds))}</span>` : '';
+        const stop = batch.status === 'running'
+          ? `<button type="button" data-write-action onclick="stopBatch('${escapeHTML(batch.id)}')">stop</button>`
+          : '';
+        const started = batch.started_at ? new Date(batch.started_at).toLocaleString() : 'unknown';
+        const source = batch.source || '-';
+        return `<tr>
+          <td data-label="Batch"><strong>${escapeHTML(batch.id)}</strong><small>${escapeHTML(started)}</small></td>
+          <td data-label="Status">${batchStatus(batch.status)}</td>
+          <td data-label="Progress">${batchProgress(batch.current, batch.total, batch.total ? Math.round(batch.current * 100 / batch.total) : 0)}${eta}</td>
+          <td data-label="Runners"><div class="batch-runners">${targets || '-'}</div></td>
+          <td data-label="Source"><code title="${escapeHTML(source)}">${escapeHTML(source)}</code></td>
+          <td data-label="Actions">${stop || '-'}</td>
+        </tr>`;
+      }).join('');
+      renderAuthState();
+    }
+
+    async function loadBatches() {
+      if (authState.role !== 'operator') return;
+      try {
+        const res = await fetch('/api/batches');
+        const text = await res.text();
+        if (!res.ok) throw new Error(text || res.statusText);
+        const data = JSON.parse(text);
+        renderBatches(data.batches || []);
+      } catch (err) {
+        const tbody = document.getElementById('batch-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6">Could not load batch runs</td></tr>';
+        console.error('failed to load batches:', err);
+      }
+    }
+
+    async function stopBatch(batch) {
+      if (!confirm(`Stop batch ${batch}?`)) return;
+      const body = new URLSearchParams({ batch });
+      try {
+        const res = await fetch('/api/batches/stop', { method: 'POST', body });
+        const text = await res.text();
+        showToast(res.ok ? `Stopped batch ${batch}` : text, !res.ok);
+        loadBatches();
+      } catch (err) {
+        showToast('Network error: ' + err, true);
+      }
+    }
+
     async function submitCreate(ev) {
       ev.preventDefault();
       const form = document.getElementById('create-form');
@@ -1028,6 +1176,7 @@
       fetchInfo();
       fetchStats();
       loadAgentOptions();
+      loadBatches();
     }
 
     fetchAuthStatus().then(refreshDashboardData);
@@ -1038,6 +1187,7 @@
       terminalState.followTail = isTerminalNearBottom(ev.currentTarget);
     });
     setInterval(fetchStats, 3000);
+    setInterval(loadBatches, 5000);
     setInterval(() => { if (authState.role === 'operator') fetchInfo(); }, 30000);
     setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);

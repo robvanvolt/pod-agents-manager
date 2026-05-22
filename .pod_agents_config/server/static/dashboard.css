@@ -367,6 +367,55 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     color: #04111b; border-color: rgba(104,225,253,.5);
 }
 
+.section-head {
+    display: flex; align-items: center; justify-content: space-between; gap: .75rem;
+    margin-bottom: .75rem;
+}
+.section-head h2 { margin: 0; font-size: .96rem; }
+.section-head button { padding: .36rem .55rem; font-size: .75rem; }
+
+.batch-card { margin-top: 1rem; }
+.batch-card td { vertical-align: top; }
+.batch-card td small {
+    display: block; margin-top: .22rem;
+    color: var(--muted); font-size: .68rem; line-height: 1.35;
+}
+.batch-card td[data-label="Source"] code {
+    display: block; max-width: 14rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+.batch-status {
+    display: inline-flex; align-items: center;
+    border: 1px solid rgba(148,163,184,.24); border-radius: 999px;
+    padding: .16rem .45rem;
+    color: #cbd5e1; background: rgba(15,23,42,.62);
+    font-size: .66rem; line-height: 1.2; text-transform: uppercase;
+}
+.batch-status.running { border-color: rgba(52,211,153,.44); color: #bbf7d0; }
+.batch-status.done { border-color: rgba(104,225,253,.36); color: #bae6fd; }
+.batch-status.stopped { border-color: rgba(251,191,36,.34); color: #fde68a; }
+.batch-progress {
+    position: relative; display: grid; place-items: center;
+    min-width: 6rem; min-height: 1.35rem; margin-bottom: .25rem;
+    overflow: hidden;
+    border: 1px solid rgba(148,163,184,.2); border-radius: .28rem;
+    background: rgba(15,23,42,.6);
+}
+.batch-progress span {
+    position: absolute; inset: 0 auto 0 0;
+    background: rgba(104,225,253,.2);
+}
+.batch-progress code { position: relative; z-index: 1; }
+.batch-runners { display: grid; gap: .38rem; min-width: 15rem; }
+.batch-runner {
+    display: grid;
+    grid-template-columns: minmax(6.5rem, auto) auto minmax(5.5rem, 1fr) auto;
+    align-items: center; gap: .35rem;
+}
+.batch-runner strong { font-size: .76rem; overflow-wrap: anywhere; }
+.batch-runner .batch-progress { margin: 0; }
+.batch-runner button { padding: .28rem .42rem; font-size: .69rem; }
+
 .out {
     margin-top: 10px; max-height: 220px; overflow: auto;
     background: rgba(3,7,18,.65);
@@ -427,6 +476,13 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     .table-card .inline { display: flex; width: 100%; gap: .35rem; }
     .table-card .inline button { flex: 1 1 4.2rem; min-width: 0; }
     .table-card .inline .icon-btn { flex: 0 0 2.2rem; width: 2.2rem; }
+    .batch-card td[data-label="Source"] code { max-width: 100%; }
+    .batch-runners { min-width: 0; }
+    .batch-runner {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: start;
+    }
+    .batch-runner .batch-progress { grid-column: 1 / -1; width: 100%; }
     th, td { font-size: .74rem; }
     .terminal-dialog { inset: 0; width: 100vw; height: 100vh; max-height: 100vh; border-radius: 0; }
     .terminal-screen { font-size: 11px; }

@@ -220,6 +220,63 @@ func TestJournalLineLimitFromRequest(t *testing.T) {
 	}
 }
 
+func TestReadBatchSummaryFromBatchFiles(t *testing.T) {
+	root := t.TempDir()
+	id := "20260522-121212-42"
+	dir := filepath.Join(root, "batch", id)
+	if err := os.MkdirAll(filepath.Join(dir, "progress"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	meta := strings.Join([]string{
+		"batch_id=" + id,
+		"started=2026-05-22T12:12:12+02:00",
+		"started_epoch=1780056732",
+		"concurrent=1",
+		"total=3",
+		"targets=pi-dev codex-main",
+		"source=/tmp/prompts.txt",
+		"pod_manager_version=0.6.0",
+	}, "\n")
+	for path, data := range map[string]string{
+		filepath.Join(dir, "meta.conf"):                   meta,
+		filepath.Join(dir, "progress", "pi-dev.prog"):     "3/3\n",
+		filepath.Join(dir, "progress", "codex-main.prog"): "1/3\n",
+		filepath.Join(dir, "done.pi-dev"):                 "done\n",
+	} {
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	summary, err := readBatchSummary(root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.ID != id || !summary.Concurrent || summary.Current != 4 || summary.Total != 6 {
+		t.Fatalf("unexpected batch summary: %#v", summary)
+	}
+	if summary.Status != "interrupted" || len(summary.Targets) != 2 {
+		t.Fatalf("unexpected batch status/targets: %#v", summary)
+	}
+	if summary.Targets[1].Target != "pi-dev" || summary.Targets[1].Status != "done" {
+		t.Fatalf("unexpected sorted done target: %#v", summary.Targets)
+	}
+}
+
+func TestTailTextFileLimitsLinesAndStripsANSI(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "batch.log")
+	if err := os.WriteFile(path, []byte("one\n\x1b[32mtwo\x1b[0m\nthree\nfour\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tailTextFile(path, 2, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "three\nfour" {
+		t.Fatalf("got %q, want last two plain lines", got)
+	}
+}
+
 func TestPodInstructionPath(t *testing.T) {
 	agent, instance, ok := parsePodInstructionPath("/api/pods/two-word/dev/instructions")
 	if !ok {
