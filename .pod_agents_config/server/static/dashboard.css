@@ -932,3 +932,313 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     background: rgba(255, 255, 255, 0.3);
 }
 
+/* PWA Install Banner styling */
+.pwa-install-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 1.25rem;
+    margin-top: 1rem;
+    margin-bottom: 1.25rem;
+    background: linear-gradient(135deg, rgba(104, 225, 253, 0.06) 0%, rgba(167, 139, 250, 0.06) 100%), var(--panel);
+    border: 1px solid rgba(104, 225, 253, 0.22);
+    border-radius: 1rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    animation: fadeInTab 0.3s ease;
+}
+.pwa-install-text {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 500;
+}
+.pwa-install-text svg {
+    color: var(--brand);
+    filter: drop-shadow(0 0 4px rgba(104, 225, 253, 0.4));
+    flex-shrink: 0;
+}
+.pwa-install-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.pwa-install-actions button {
+    font-size: 0.8rem;
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+}
+.pwa-install-actions button.primary {
+    background: linear-gradient(135deg, var(--brand), var(--brand-2));
+    color: #04111b;
+    border-color: rgba(104, 225, 253, 0.5);
+}
+.pwa-install-actions button.primary:hover {
+    border-color: #fff;
+    box-shadow: 0 0 10px rgba(104, 225, 253, 0.4);
+}
+
+/* Additional mobile optimizations for PWA & tab overview */
+@media (max-width: 760px) {
+    .pwa-install-banner {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+        gap: 0.85rem;
+        padding: 1rem;
+    }
+    .pwa-install-text {
+        justify-content: center;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+    .pwa-install-actions {
+        justify-content: center;
+    }
+    .pwa-install-actions button {
+        flex: 1;
+        padding: 0.55rem 1rem;
+        min-height: 44px; /* Accessible touch target */
+    }
+    .tabs-nav {
+        gap: 0.75rem;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 0.25rem;
+    }
+    .tab-btn {
+        white-space: nowrap;
+        font-size: 0.8rem;
+        padding: 0.6rem 0.85rem;
+        min-height: 44px; /* Accessible touch target */
+    }
+    .topbar button {
+        min-height: 44px; /* Accessible touch target */
+    }
+    .actions-row button {
+        min-height: 44px; /* Accessible touch target */
+    }
+}
+
+/* Notification Bell Count */
+.notification-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    line-height: 1;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+/* Notification Panel Drawer */
+.notification-panel {
+    position: fixed;
+    top: 5.5rem;
+    right: 1.25rem;
+    width: 360px;
+    max-height: 480px;
+    background: rgba(13, 21, 36, 0.94);
+    border: 1px solid var(--panel-border);
+    border-radius: 1rem;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: fadeInTab 0.3s ease;
+}
+
+.notification-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.notification-panel-header h3 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.notification-list {
+    overflow-y: auto;
+    max-height: 400px;
+    padding: 0.25rem 0;
+}
+.notification-list .empty-state {
+    text-align: center;
+    padding: 2rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+    opacity: 0.6;
+}
+
+.notification-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.85rem 1.25rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.notification-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+.notification-item.read {
+    opacity: 0.45;
+}
+.notification-icon {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    background: rgba(104, 225, 253, 0.08);
+    color: var(--brand);
+    border: 1px solid rgba(104, 225, 253, 0.15);
+}
+.notification-icon svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+.notification-body {
+    flex: 1;
+    min-width: 0;
+}
+.notification-body strong {
+    font-size: 0.8rem;
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--text);
+}
+.notification-body p {
+    font-size: 0.74rem;
+    color: var(--muted);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.notification-body small {
+    font-size: 0.68rem;
+    opacity: 0.5;
+    display: block;
+    margin-top: 0.25rem;
+}
+
+@media (max-width: 480px) {
+    .notification-panel {
+        right: 8px;
+        left: 8px;
+        width: auto;
+    }
+}
+
+/* Pod Metadata UI styling */
+.star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: rgba(255, 255, 255, 0.25);
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+}
+.star-btn:hover {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.08);
+}
+.star-btn.active {
+    color: #fbbf24;
+    filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.5));
+}
+.star-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+.star-btn:not(.active) svg {
+    fill: none;
+}
+
+.tag-pill {
+    display: inline-block;
+    font-size: 0.62rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: lowercase;
+    background: rgba(167, 139, 250, 0.06);
+    color: #c4b5fd;
+    border: 1px solid rgba(167, 139, 250, 0.18);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+.tag-pill:hover {
+    background: rgba(167, 139, 250, 0.12);
+    border-color: rgba(167, 139, 250, 0.3);
+}
+
+.meta-edit-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    color: rgba(255, 255, 255, 0.25);
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+}
+.meta-edit-btn:hover {
+    color: var(--brand);
+    background: rgba(104, 225, 253, 0.08);
+}
+.meta-edit-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+}
+
+
+

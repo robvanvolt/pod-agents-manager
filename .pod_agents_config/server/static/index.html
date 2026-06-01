@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pod Dashboard</title>
   <link rel="icon" href="./logo.svg" type="image/svg+xml">
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0a0e17">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="./vendor/xterm/xterm.css">
   <link rel="stylesheet" href="./dashboard.css">
 </head>
@@ -26,10 +30,32 @@
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
         <button type="button" id="passkey-manage-button" onclick="openPasskeyDialog()" hidden>Passkeys</button>
         <button type="button" id="passkey-register-button" onclick="registerPasskey()" hidden>Register Passkey</button>
+        <button type="button" id="notification-bell" class="icon-btn" title="Notifications" onclick="toggleNotificationPanel()" style="position: relative;" hidden>
+          <span data-icon="bell"></span>
+          <span id="notification-count" class="notification-count" hidden>0</span>
+        </button>
         <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
   </div>
   <div id="toast" class="toast"></div>
+  <div id="pwa-install-banner" class="pwa-install-banner" hidden>
+    <span class="pwa-install-text">
+      <span data-icon="download"></span> Install Pod Manager as a web app for quick, offline-ready access
+    </span>
+    <div class="pwa-install-actions">
+      <button class="primary" onclick="installPWA()">Install</button>
+      <button onclick="dismissPWA()">Dismiss</button>
+    </div>
+  </div>
+  <div id="notification-panel" class="notification-panel" hidden>
+    <div class="notification-panel-header">
+      <h3>Notifications</h3>
+      <button type="button" class="icon-btn" onclick="dismissAllNotifications()" title="Dismiss all"><span data-icon="check"></span></button>
+    </div>
+    <div id="notification-list" class="notification-list">
+      <p class="empty-state">No notifications</p>
+    </div>
+  </div>
   <dialog id="auth-dialog" class="auth-dialog">
     <form method="dialog" class="auth-panel" onsubmit="return submitAuthDialog(event)">
       <div class="auth-head">
@@ -151,6 +177,8 @@
             <div><label>Flavor</label><select name="flavor" id="f-flavor"></select></div>
             <div><label>Volumes</label><select name="volumes" id="f-volumes"></select></div>
             <div><label>Base image</label><select name="base" id="f-base"></select></div>
+            <div><label>Memory Limit <span style="opacity:.6">(optional)</span></label><input name="memory" id="f-memory" placeholder="e.g. 2G, 512M"></div>
+            <div><label>CPU Limit <span style="opacity:.6">(optional)</span></label><input name="cpu" id="f-cpu" placeholder="e.g. 1.5, 2.0"></div>
           </div>
           <div class="actions-row">
             <button type="submit" class="primary" id="f-submit">Start pod</button>
@@ -408,7 +436,10 @@
       const paths = {
         cpu: '<rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M9 9h6v6H9z"></path><path d="M9 1v3"></path><path d="M15 1v3"></path><path d="M9 20v3"></path><path d="M15 20v3"></path><path d="M20 9h3"></path><path d="M20 15h3"></path><path d="M1 9h3"></path><path d="M1 15h3"></path>',
         binoculars: '<path d="M8.6 4.2 6.4 5.3 4.5 12.1"></path><path d="M15.4 4.2l2.2 1.1 1.9 6.8"></path><path d="M9 5h6"></path><path d="M10 8h4"></path><circle cx="7" cy="16" r="4"></circle><circle cx="17" cy="16" r="4"></circle><path d="M11 16h2"></path>',
+        bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path>',
         check: '<path d="M20 6 9 17l-5-5"></path>',
+        star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"></polygon>',
+        edit: '<path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"></path>',
         download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path>',
         fileText: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h8"></path>',
         message: '<path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8A8.5 8.5 0 0 1 8.7 4a8.4 8.4 0 0 1 3.8-.9h.5"></path><path d="M19 3v6"></path><path d="M16 6h6"></path>',
@@ -556,6 +587,24 @@
       document.querySelectorAll('[data-write-action], [data-operator-action]').forEach(el => {
         el.disabled = !canWrite || Boolean(el.dataset.disabledReason);
       });
+
+      if (!canWrite) {
+        if (notificationSSE) {
+          notificationSSE.close();
+          notificationSSE = null;
+        }
+        notifications = [];
+        const bellBtn = document.getElementById('notification-bell');
+        if (bellBtn) bellBtn.hidden = true;
+        const panel = document.getElementById('notification-panel');
+        if (panel) panel.hidden = true;
+        updateNotificationUI();
+      } else {
+        const bellBtn = document.getElementById('notification-bell');
+        if (bellBtn) bellBtn.hidden = false;
+        loadNotifications();
+        connectNotificationSSE();
+      }
     }
 
     async function toggleAuth() {
@@ -846,9 +895,43 @@
             <button data-write-action class="icon-btn" data-disabled-reason="${canInstruct ? '' : 'idle'}" ${canWrite && canInstruct ? '' : 'disabled'} title="${canInstruct ? 'Instruct idle pod' : 'Pod is not idle'}" aria-label="Instruct ${agent}-${instance}" onclick="sendInstruction('${agent}','${instance}')">${icon('send')}</button>
             <button data-write-action class="icon-btn danger" ${canWrite ? '' : 'disabled'} title="Delete pod" aria-label="Delete ${agent}-${instance}" onclick="confirmDelete('${agent}','${instance}')">${icon('trash')}</button>
           </div>` : '';
+        const isFavorite = c.Favorite === true;
+        const notes = c.Notes || '';
+        const tags = Array.isArray(c.Tags) ? c.Tags : [];
+        const starClass = isFavorite ? 'star-btn active' : 'star-btn';
+        
+        const starBtn = (agent && instance) ? `
+          <button type="button" class="${starClass}" onclick="toggleFavorite('${agent}','${instance}')" title="${isFavorite ? 'Remove from favorites' : 'Mark as favorite'}">
+            ${icon('star')}
+          </button>
+        ` : '';
+
+        const editBtn = (agent && instance) ? `
+          <button type="button" class="meta-edit-btn" onclick="openMetaEditor('${agent}','${instance}')" title="Edit notes & tags">
+            ${icon('edit')}
+          </button>
+        ` : '';
+
+        const tagPills = tags.map(t => `<span class="tag-pill">${escapeHTML(t)}</span>`).join('');
+        const notesTooltip = notes ? ` title="Notes: ${escapeHTML(notes)}"` : '';
+        const notesBadge = notes ? `<span class="notes-indicator"${notesTooltip} style="cursor: help; margin-left: 6px; font-size: 0.65rem; color: var(--brand); border-bottom: 1px dotted var(--brand);">[notes]</span>` : '';
+
+        const nameCell = `
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            ${starBtn}
+            <b${notesTooltip}>${name}</b>
+            ${managedBadge}
+            ${notesBadge}
+            ${editBtn}
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+            ${tagPills}
+          </div>
+        `;
+
         return `<tr>
           <td data-label="ID"><code>${id}</code></td>
-          <td data-label="Name"><b>${name}</b>${managedBadge}</td>
+          <td data-label="Name">${nameCell}</td>
           <td data-label="Activity">${activityBadge(c.ActivityState, c.ActivityDetail)}</td>
           <td data-label="CPU %">${heatCellWithSpark(cpu, fmtPct(c.CPU || c.CPUPerc), cpuSpark)}</td>
           <td data-label="MEM Usage">${memUsage(c)}</td>
@@ -1787,6 +1870,213 @@
     setInterval(() => { if (authState.role === 'operator') fetchInfo(); }, 30000);
     setInterval(fetchAuthStatus, 30000);
     setInterval(updateClock, 1000);
+
+    // PWA Logic & Service Worker registration
+    let deferredPWAPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPWAPrompt = e;
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner && !localStorage.getItem('pwa-dismissed')) {
+        banner.hidden = false;
+      }
+    });
+
+    function installPWA() {
+      if (deferredPWAPrompt) {
+        deferredPWAPrompt.prompt();
+        deferredPWAPrompt.userChoice.then(() => {
+          deferredPWAPrompt = null;
+        });
+      }
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner) banner.hidden = true;
+    }
+
+    function dismissPWA() {
+      localStorage.setItem('pwa-dismissed', '1');
+      const banner = document.getElementById('pwa-install-banner');
+      if (banner) banner.hidden = true;
+    }
+
+    let notificationSSE = null;
+    let notifications = [];
+
+    function connectNotificationSSE() {
+      if (notificationSSE) return;
+      if (authState.role !== 'operator') return;
+      notificationSSE = new EventSource('/api/notifications/stream');
+      notificationSSE.onmessage = (e) => {
+        try {
+          const n = JSON.parse(e.data);
+          notifications.unshift(n);
+          if (notifications.length > 50) {
+            notifications = notifications.slice(0, 50);
+          }
+          updateNotificationUI();
+          showToast(`Notification: ${n.title} - ${n.message}`);
+        } catch (_) {}
+      };
+      notificationSSE.onerror = () => {
+        if (notificationSSE) {
+          notificationSSE.close();
+          notificationSSE = null;
+        }
+        setTimeout(connectNotificationSSE, 5000);
+      };
+    }
+
+    async function loadNotifications() {
+      if (authState.role !== 'operator') return;
+      try {
+        const res = await fetch('/api/notifications');
+        if (res.ok) {
+          notifications = await res.json();
+          updateNotificationUI();
+        }
+      } catch (_) {}
+    }
+
+    function updateNotificationUI() {
+      const countEl = document.getElementById('notification-count');
+      const listEl = document.getElementById('notification-list');
+      const unread = notifications.filter(n => !n.read).length;
+      if (countEl) {
+        countEl.textContent = unread;
+        countEl.hidden = unread === 0;
+      }
+      if (listEl) {
+        if (notifications.length === 0) {
+          listEl.innerHTML = '<p class="empty-state">No notifications</p>';
+        } else {
+          listEl.innerHTML = notifications.map(n => {
+            const timeAgo = formatTimeAgo(n.timestamp);
+            const typeIcon = { agent_intervened: 'cpu', pod_idle: 'dot', batch_completed: 'check', pod_failed: 'alert', agent_question: 'message' }[n.type] || 'bell';
+            return `<div class="notification-item ${n.read ? 'read' : ''}" onclick="dismissNotification('${n.id}')" title="Click to dismiss">
+              <div class="notification-icon">${icon(typeIcon)}</div>
+              <div class="notification-body">
+                <strong>${escapeHTML(n.title)}</strong>
+                <p>${escapeHTML(n.message)}</p>
+                <small>${timeAgo}</small>
+              </div>
+            </div>`;
+          }).join('');
+        }
+      }
+    }
+
+    function formatTimeAgo(ts) {
+      if (!ts) return 'just now';
+      const diff = Date.now() - new Date(ts).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + 'm ago';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + 'h ago';
+      return Math.floor(hrs / 24) + 'd ago';
+    }
+
+    function toggleNotificationPanel() {
+      const panel = document.getElementById('notification-panel');
+      if (panel) panel.hidden = !panel.hidden;
+    }
+
+    async function dismissNotification(id) {
+      try {
+        await fetch('/api/notifications', {
+          method: 'DELETE',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({id})
+        });
+        const n = notifications.find(x => x.id === id);
+        if (n) n.read = true;
+        updateNotificationUI();
+      } catch (_) {}
+    }
+
+    async function dismissAllNotifications() {
+      try {
+        await fetch('/api/notifications', { method: 'DELETE' });
+        notifications.forEach(n => n.read = true);
+        updateNotificationUI();
+      } catch (_) {}
+    }
+
+    async function toggleFavorite(agent, instance) {
+      if (authState.role !== 'operator') return;
+      const star = document.querySelector(`.star-btn[onclick*="${agent}"][onclick*="${instance}"]`);
+      if (star) {
+        star.classList.toggle('active');
+      }
+      
+      try {
+        const getRes = await fetch(`/api/pods/meta?agent=${agent}&instance=${instance}`);
+        let meta = { notes: '', tags: [], favorite: false };
+        if (getRes.ok) {
+          meta = await getRes.json();
+        }
+        meta.favorite = !meta.favorite;
+        
+        await fetch('/api/pods/meta', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ agent, instance, ...meta })
+        });
+        fetchStats();
+      } catch (err) {
+        console.error('Failed to toggle favorite:', err);
+      }
+    }
+
+    async function openMetaEditor(agent, instance) {
+      if (authState.role !== 'operator') return;
+      try {
+        const getRes = await fetch(`/api/pods/meta?agent=${agent}&instance=${instance}`);
+        let meta = { notes: '', tags: [], favorite: false };
+        if (getRes.ok) {
+          meta = await getRes.json();
+        }
+
+        const notes = prompt(`Notes for ${agent}-${instance}:`, meta.notes || '');
+        if (notes === null) return;
+
+        const tagsInput = prompt(`Tags for ${agent}-${instance} (comma-separated):`, (meta.tags || []).join(', '));
+        if (tagsInput === null) return;
+
+        const tags = tagsInput.split(',')
+          .map(t => t.trim())
+          .filter(Boolean);
+
+        const newMeta = {
+          agent,
+          instance,
+          notes,
+          tags,
+          favorite: meta.favorite
+        };
+
+        const postRes = await fetch('/api/pods/meta', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(newMeta)
+        });
+
+        if (postRes.ok) {
+          showToast('Pod metadata updated');
+          fetchStats();
+        } else {
+          showToast('Failed to update metadata', true);
+        }
+      } catch (err) {
+        console.error('Failed to update pod metadata:', err);
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(err => {
+        console.warn('SW registration failed:', err);
+      });
+    }
   </script>
 </body>
 </html>

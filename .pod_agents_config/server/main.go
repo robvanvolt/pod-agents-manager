@@ -112,7 +112,15 @@ func main() {
 
 	go startAgentManagerLoop(root)
 	mux := http.NewServeMux()
-	mux.Handle("/", noCache(http.FileServer(http.Dir("./static"))))
+	fileServer := http.FileServer(http.Dir("./static"))
+	mux.Handle("/", noCache(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sw.js" {
+			w.Header().Set("Content-Type", "application/javascript")
+		} else if r.URL.Path == "/manifest.json" {
+			w.Header().Set("Content-Type", "application/manifest+json")
+		}
+		fileServer.ServeHTTP(w, r)
+	})))
 
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
 		if !requireOperatorRead(w, r, root) {
@@ -404,6 +412,9 @@ func main() {
 		volumes := strings.TrimSpace(r.FormValue("volumes"))
 		base := strings.TrimSpace(r.FormValue("base"))
 
+		memory := strings.TrimSpace(r.FormValue("memory"))
+		cpu := strings.TrimSpace(r.FormValue("cpu"))
+
 		if !validIdent(agent) {
 			http.Error(w, "invalid agent", http.StatusBadRequest)
 			return
@@ -427,11 +438,37 @@ func main() {
 			return
 		}
 
-		// All inputs already pass validIdent (or are blank for instance), so they're safe
+		// Validate memory if set
+		if memory != "" {
+			matched, _ := regexp.MatchString("^[0-9]+[gGmMkK]?$", memory)
+			if !matched {
+				http.Error(w, "invalid memory limit (must be e.g. 512M or 2G)", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// Validate cpu if set
+		if cpu != "" {
+			matched, _ := regexp.MatchString("^[0-9]+(\\.[0-9]+)?$", cpu)
+			if !matched {
+				http.Error(w, "invalid cpu limit (must be e.g. 1.5 or 2.0)", http.StatusBadRequest)
+				return
+			}
+		}
+
+		extraFlags := ""
+		if memory != "" {
+			extraFlags += fmt.Sprintf(" --memory %s", memory)
+		}
+		if cpu != "" {
+			extraFlags += fmt.Sprintf(" --cpu %s", cpu)
+		}
+
+		// All inputs already pass validation, so they're safe
 		// to embed unquoted. Instance is wrapped in single quotes so a blank value still
 		// occupies the positional slot (`pod start agent '' flavor volumes base`).
-		shellCmd := fmt.Sprintf("source ~/.pod_agents && pod start %s '%s' %s %s %s",
-			agent, instance, flavor, volumes, base)
+		shellCmd := fmt.Sprintf("source ~/.pod_agents && pod start %s '%s' %s %s %s%s",
+			agent, instance, flavor, volumes, base, extraFlags)
 		cmd := exec.Command("bash", "-lc", shellCmd)
 		output, err := cmd.CombinedOutput()
 		w.Header().Set("Content-Type", "application/json")
@@ -970,6 +1007,156 @@ func main() {
 	mux.HandleFunc("/v1/completions", shamTextCompletions)
 	mux.HandleFunc("/v1/messages", shamAnthropicMessages)
 
+	// --- Notification Center Endpoints ---
+
+	mux.HandleFunc("/api/notifications", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if !requireOperatorRead(w, r, root) {
+				return
+			}
+			list, err := readNotifications(root, 50)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(list)
+			return
+		}
+
+		if r.Method == http.MethodDelete {
+			_, ok := requireOperator(w, r, root, "notifications.dismiss", "")
+			if !ok {
+				return
+			}
+			// Optional body: {"id": "..."}
+			var body struct {
+				ID string `json:"id"`
+			}
+			// Read body if present
+			decoder := json.NewDecoder(r.Body)
+			if err := decoder.Decode(&body); err == nil && body.ID != "" {
+				if err := dismissNotification(root, body.ID); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				appendAudit(root, auditEntryFromRequest(r, "notifications.dismiss", body.ID, "ok", "", "operator"))
+			} else {
+				if err := dismissAllNotifications(root); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				appendAudit(root, auditEntryFromRequest(r, "notifications.dismiss_all", "", "ok", "", "operator"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	mux.HandleFunc("/api/notifications/stream", func(w http.ResponseWriter, r *http.Request) {
+		if !requireOperatorRead(w, r, root) {
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		ch := make(chan notification, 10)
+		notifySubscribers.Store(ch, true)
+		defer func() {
+			notifySubscribers.Delete(ch)
+		}()
+
+		// Send an initial handshake comment to keep the connection alive
+		fmt.Fprintf(w, ": ok\n\n")
+		flusher.Flush()
+
+		ctx := r.Context()
+		for {
+			select {
+			case n, open := <-ch:
+				if !open {
+					return
+				}
+				data, err := json.Marshal(n)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			case <-ctx.Done():
+				return
+			}
+		}
+	})
+
+	// --- Pod Metadata Endpoints ---
+
+	mux.HandleFunc("/api/pods/meta", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if !requireOperatorRead(w, r, root) {
+				return
+			}
+			agent := r.URL.Query().Get("agent")
+			instance := r.URL.Query().Get("instance")
+			if agent == "" || instance == "" {
+				http.Error(w, "missing agent or instance", http.StatusBadRequest)
+				return
+			}
+			m := loadPodMeta(agent, instance)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(m)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			_, ok := requireOperator(w, r, root, "pods.meta.save", "")
+			if !ok {
+				return
+			}
+			var body struct {
+				Agent    string   `json:"agent"`
+				Instance string   `json:"instance"`
+				Notes    string   `json:"notes"`
+				Tags     []string `json:"tags"`
+				Favorite bool     `json:"favorite"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "Bad JSON: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+			if body.Agent == "" || body.Instance == "" {
+				http.Error(w, "missing agent or instance", http.StatusBadRequest)
+				return
+			}
+			m := podMeta{
+				Notes:    body.Notes,
+				Tags:     body.Tags,
+				Favorite: body.Favorite,
+			}
+			if err := savePodMeta(body.Agent, body.Instance, m); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			appendAudit(root, auditEntryFromRequest(r, "pods.meta.save", body.Agent+"-"+body.Instance, "ok", "", "operator"))
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			return
+		}
+
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	})
+
 	port := os.Getenv("POD_SERVER_PORT")
 	if port == "" {
 		port = "1337"
@@ -1442,6 +1629,33 @@ func updateStatsLoop() {
 				}
 				enrichActivity(row, root)
 				enrichPublishedPorts(row, publishedPorts)
+
+				// Fire state transition notifications
+				name := firstString(row, "Name", "Container", "ContainerName")
+				if state, ok := row["ActivityState"].(string); ok && name != "" {
+					lastState, exists := lastPodStates.Load(name)
+					if !exists {
+						lastPodStates.Store(name, state)
+					} else if lastState != state {
+						lastPodStates.Store(name, state)
+						if state == "idle" && lastState == "running" {
+							fireNotification(root, "pod_idle", "Pod Became Idle", fmt.Sprintf("Pod %s is now idle and waiting for input.", name), name)
+						}
+					}
+				}
+
+				// Enrich with workspace metadata
+				if agent, instance, ok := splitManagedPodName(root, name); ok {
+					meta := loadPodMeta(agent, instance)
+					row["Notes"] = meta.Notes
+					row["Tags"] = meta.Tags
+					row["Favorite"] = meta.Favorite
+				} else {
+					row["Notes"] = ""
+					row["Tags"] = []string{}
+					row["Favorite"] = false
+				}
+
 				containers = append(containers, row)
 			}
 		}
@@ -4775,6 +4989,7 @@ func startAgentManagerLoop(root string) {
 
 			if apiKey == "" {
 				logAgentManagerIntervention(root, fmt.Sprintf("Error auditing %s: OPENAI_API_KEY is not set in environment", key))
+				fireNotification(root, "pod_failed", "Agent Manager Error", fmt.Sprintf("OPENAI_API_KEY is not set. Cannot run autonomous steering for %s.", key), key)
 				agentManagerMutex.Lock()
 				agentManagerCooldown[key] = time.Now().Add(5 * time.Minute)
 				agentManagerMutex.Unlock()
@@ -4790,6 +5005,7 @@ func startAgentManagerLoop(root string) {
 			response, err := queryLLM(apiKey, apiURL, model, cfg.SystemPrompt, capture)
 			if err != nil {
 				logAgentManagerIntervention(root, fmt.Sprintf("Error querying LLM for %s: %v", key, err))
+				fireNotification(root, "pod_failed", "LLM Query Failed", fmt.Sprintf("Error querying LLM for %s: %v", key, err), key)
 				agentManagerMutex.Lock()
 				agentManagerCooldown[key] = time.Now().Add(1 * time.Minute)
 				agentManagerMutex.Unlock()
@@ -4812,10 +5028,12 @@ func startAgentManagerLoop(root string) {
 			logAgentManagerIntervention(root, fmt.Sprintf("Intervening on %s: sending command: %q", key, response))
 			if err := sendTerminalInput(agent, instance, response); err != nil {
 				logAgentManagerIntervention(root, fmt.Sprintf("Error sending command to %s: %v", key, err))
+				fireNotification(root, "pod_failed", "Intervention Failed", fmt.Sprintf("Failed to send command to %s: %v", key, err), key)
 				agentManagerMutex.Lock()
 				agentManagerCooldown[key] = time.Now().Add(30 * time.Second)
 				agentManagerMutex.Unlock()
 			} else {
+				fireNotification(root, "agent_intervened", "Agent Manager Intervention", fmt.Sprintf("Sent command to %s: %s", key, response), key)
 				agentManagerMutex.Lock()
 				agentManagerCooldown[key] = time.Now().Add(45 * time.Second) // 45s to execute
 				agentManagerMutex.Unlock()
@@ -4840,4 +5058,286 @@ func getPodTmuxCapture(container string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// --- Notification Center Helpers & Types ---
+
+type notification struct {
+	ID        string `json:"id"`
+	Type      string `json:"type"` // pod_idle, batch_completed, agent_question, pod_failed, agent_intervened
+	Title     string `json:"title"`
+	Message   string `json:"message"`
+	Pod       string `json:"pod,omitempty"`
+	Timestamp string `json:"timestamp"`
+	Read      bool   `json:"read"`
+}
+
+var (
+	notificationMutex sync.Mutex
+	notifySubscribers sync.Map // map[chan notification]bool
+	lastPodStates     sync.Map // map[string]string (containerName -> state)
+)
+
+func notificationFile(root string) string {
+	return filepath.Join(root, "server", "notifications.jsonl")
+}
+
+func appendNotification(root string, n notification) error {
+	notificationMutex.Lock()
+	defer notificationMutex.Unlock()
+
+	file := notificationFile(root)
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		return err
+	}
+
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	data, err := json.Marshal(n)
+	if err != nil {
+		return err
+	}
+
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		return err
+	}
+	return nil
+}
+
+func readNotifications(root string, limit int) ([]notification, error) {
+	notificationMutex.Lock()
+	defer notificationMutex.Unlock()
+
+	file := notificationFile(root)
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		return []notification{}, nil
+	}
+
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var list []notification
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var n notification
+		if err := json.Unmarshal(line, &n); err == nil {
+			list = append(list, n)
+		}
+	}
+
+	// Return newest first, capped to limit
+	if len(list) == 0 {
+		return []notification{}, nil
+	}
+
+	// Reverse
+	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
+		list[i], list[j] = list[j], list[i]
+	}
+
+	if limit > 0 && len(list) > limit {
+		list = list[:limit]
+	}
+
+	return list, nil
+}
+
+func dismissNotification(root string, id string) error {
+	notificationMutex.Lock()
+	defer notificationMutex.Unlock()
+
+	file := notificationFile(root)
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		return nil
+	}
+
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var list []notification
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var n notification
+		if err := json.Unmarshal(line, &n); err == nil {
+			if n.ID == id {
+				n.Read = true
+			}
+			list = append(list, n)
+		}
+	}
+
+	// Re-write file
+	tmpFile := file + ".tmp"
+	tmpF, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer tmpF.Close()
+
+	for _, n := range list {
+		data, err := json.Marshal(n)
+		if err != nil {
+			return err
+		}
+		if _, err := tmpF.Write(append(data, '\n')); err != nil {
+			return err
+		}
+	}
+
+	tmpF.Close()
+	return os.Rename(tmpFile, file)
+}
+
+func dismissAllNotifications(root string) error {
+	notificationMutex.Lock()
+	defer notificationMutex.Unlock()
+
+	file := notificationFile(root)
+	if _, err := os.Stat(file); os.IsNotExist(err) {
+		return nil
+	}
+
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var list []notification
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var n notification
+		if err := json.Unmarshal(line, &n); err == nil {
+			n.Read = true
+			list = append(list, n)
+		}
+	}
+
+	// Re-write file
+	tmpFile := file + ".tmp"
+	tmpF, err := os.OpenFile(tmpFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer tmpF.Close()
+
+	for _, n := range list {
+		data, err := json.Marshal(n)
+		if err != nil {
+			return err
+		}
+		if _, err := tmpF.Write(append(data, '\n')); err != nil {
+			return err
+		}
+	}
+
+	tmpF.Close()
+	return os.Rename(tmpFile, file)
+}
+
+func fireNotification(root string, ntype, title, message, pod string) {
+	// Generate random hex ID
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		b = []byte(fmt.Sprintf("%d", time.Now().UnixNano()))
+	}
+	id := hex.EncodeToString(b)
+
+	n := notification{
+		ID:        id,
+		Type:      ntype,
+		Title:     title,
+		Message:   message,
+		Pod:       pod,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Read:      false,
+	}
+
+	if err := appendNotification(root, n); err != nil {
+		log.Printf("Error appending notification: %v", err)
+	}
+
+	broadcastNotification(n)
+}
+
+func broadcastNotification(n notification) {
+	notifySubscribers.Range(func(key, val interface{}) bool {
+		ch, ok := key.(chan notification)
+		if ok {
+			select {
+			case ch <- n:
+			default:
+				// Channel blocked, skip
+			}
+		}
+		return true
+	})
+}
+
+// --- Pod Metadata Helpers & Types ---
+
+type podMeta struct {
+	Notes    string   `json:"notes"`
+	Tags     []string `json:"tags"`
+	Favorite bool     `json:"favorite"`
+}
+
+func podMetaPath(agent, instance string) string {
+	return filepath.Join(os.Getenv("HOME"), "Developer", agent+"-pods", instance, ".pod_meta.json")
+}
+
+func loadPodMeta(agent, instance string) podMeta {
+	m := podMeta{Tags: []string{}}
+	path := podMetaPath(agent, instance)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return m
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return m
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return m
+	}
+	if m.Tags == nil {
+		m.Tags = []string{}
+	}
+	return m
+}
+
+func savePodMeta(agent, instance string, m podMeta) error {
+	path := podMetaPath(agent, instance)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	if m.Tags == nil {
+		m.Tags = []string{}
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }

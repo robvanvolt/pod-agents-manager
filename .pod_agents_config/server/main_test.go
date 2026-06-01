@@ -966,4 +966,170 @@ func TestBatchDeletionHandler(t *testing.T) {
 	}
 }
 
+func TestAppendAndReadNotifications(t *testing.T) {
+	root := t.TempDir()
+
+	n1 := notification{
+		ID:        "n1",
+		Type:      "pod_idle",
+		Title:     "Pod Idle",
+		Message:   "Pod 1 is idle",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Read:      false,
+	}
+	n2 := notification{
+		ID:        "n2",
+		Type:      "batch_completed",
+		Title:     "Batch Completed",
+		Message:   "Batch 2 is done",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Read:      false,
+	}
+
+	if err := appendNotification(root, n1); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendNotification(root, n2); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := readNotifications(root, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(list) != 2 {
+		t.Fatalf("expected 2 notifications, got %d", len(list))
+	}
+
+	// Order: newest first (n2, then n1)
+	if list[0].ID != "n2" || list[1].ID != "n1" {
+		t.Fatalf("unexpected order: first is %s, second is %s", list[0].ID, list[1].ID)
+	}
+}
+
+func TestDismissNotification(t *testing.T) {
+	root := t.TempDir()
+
+	n1 := notification{
+		ID:        "n1",
+		Type:      "pod_idle",
+		Title:     "Pod Idle",
+		Message:   "Pod 1 is idle",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Read:      false,
+	}
+	n2 := notification{
+		ID:        "n2",
+		Type:      "batch_completed",
+		Title:     "Batch Completed",
+		Message:   "Batch 2 is done",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Read:      false,
+	}
+
+	if err := appendNotification(root, n1); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendNotification(root, n2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dismissNotification(root, "n1"); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := readNotifications(root, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(list) != 2 {
+		t.Fatalf("expected 2 notifications, got %d", len(list))
+	}
+
+	// n1 should be read=true, n2 should be read=false
+	for _, n := range list {
+		if n.ID == "n1" && !n.Read {
+			t.Fatal("expected n1 to be read=true")
+		}
+		if n.ID == "n2" && n.Read {
+			t.Fatal("expected n2 to be read=false")
+		}
+	}
+}
+
+func TestDismissAllNotifications(t *testing.T) {
+	root := t.TempDir()
+
+	n1 := notification{
+		ID:        "n1",
+		Type:      "pod_idle",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	n2 := notification{
+		ID:        "n2",
+		Type:      "batch_completed",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	if err := appendNotification(root, n1); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendNotification(root, n2); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := dismissAllNotifications(root); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := readNotifications(root, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(list) != 2 {
+		t.Fatalf("expected 2 notifications, got %d", len(list))
+	}
+
+	for _, n := range list {
+		if !n.Read {
+			t.Fatalf("expected notification %s to be read=true", n.ID)
+		}
+	}
+}
+
+func TestPodMetaLoadSave(t *testing.T) {
+	oldHome := os.Getenv("HOME")
+	tempDir := t.TempDir()
+	os.Setenv("HOME", tempDir)
+	defer os.Setenv("HOME", oldHome)
+
+	agent := "test-agent"
+	instance := "test-inst"
+
+	m := podMeta{
+		Notes:    "This is a test notes section",
+		Tags:     []string{"tag-one", "tag-two"},
+		Favorite: true,
+	}
+
+	if err := savePodMeta(agent, instance, m); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := loadPodMeta(agent, instance)
+	if loaded.Notes != m.Notes {
+		t.Fatalf("got notes %q, want %q", loaded.Notes, m.Notes)
+	}
+	if len(loaded.Tags) != 2 || loaded.Tags[0] != "tag-one" || loaded.Tags[1] != "tag-two" {
+		t.Fatalf("unexpected tags: %v", loaded.Tags)
+	}
+	if !loaded.Favorite {
+		t.Fatal("expected favorite to be true")
+	}
+}
+
+
 

@@ -344,6 +344,38 @@ t_model_flag_missing_value_errors() {
     [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-model requires a value'
 }
 
+t_memory_flag_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --memory 2G 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_cpu_flag_parses() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" doctor --cpu 1.5 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'pod-agents-manager doctor'
+}
+
+t_resource_flags_missing_value_errors() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    
+    out=$(run_pod_in_sandbox "$sandbox" doctor --memory 2>&1)
+    rc=$?
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-memory requires a value' || { rm -rf "$sandbox"; return 1; }
+    
+    out=$(run_pod_in_sandbox "$sandbox" doctor --cpu 2>&1)
+    rc=$?
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q '\-\-cpu requires a value' || { rm -rf "$sandbox"; return 1; }
+    
+    rm -rf "$sandbox"
+    return 0
+}
+
 t_endpoint_flag_parses() {
     local sandbox out rc
     sandbox=$(setup_sandbox)
@@ -873,6 +905,9 @@ run_test "smoke: pod doctor runs"              t_pod_doctor_runs
 run_test "smoke: pod doctor exit ↔ fail count" t_pod_doctor_exit_matches_fail_count
 run_test "build flag: --no-cache parses"       t_no_cache_flag_parses
 run_test "build flag: --cached parses"         t_cached_flag_parses
+run_test "memory flag: --memory VAL parses"    t_memory_flag_parses
+run_test "cpu flag: --cpu VAL parses"          t_cpu_flag_parses
+run_test "resource flags: missing value errors" t_resource_flags_missing_value_errors
 run_test "model flag: --model VAL parses"      t_model_flag_parses
 run_test "model flag: --model=VAL parses"      t_model_flag_eq_form_parses
 run_test "model flag: missing value errors"    t_model_flag_missing_value_errors

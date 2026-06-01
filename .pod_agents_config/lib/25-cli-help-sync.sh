@@ -20,7 +20,7 @@ Usage:
   ${_cmd} <action> [agent] [instance] [flavor] [volumes] [base]
             [--model NAME] [--endpoint URL] [--api-key KEY]
             [--ports HOST:CONTAINER[,...]] [--from-template NAME]
-            [--no-cache | --cached]
+            [--memory VALUE] [--cpu VALUE] [--no-cache | --cached]
 
 Actions:
   lifecycle    start stop restart status stats remove delete remove-all delete-all

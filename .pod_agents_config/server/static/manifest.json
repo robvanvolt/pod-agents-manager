@@ -1,0 +1,17 @@
+{
+  "name": "Pod Agents Manager",
+  "short_name": "Pod Manager",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0a0e17",
+  "background_color": "#0a0e17",
+  "description": "A rootless Podman + Quadlet fleet manager for running and orchestrating local AI coding agents.",
+  "icons": [
+    {
+      "src": "./logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

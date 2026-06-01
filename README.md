@@ -45,7 +45,7 @@ Ships with plugins for Claude Code, Codex, Command Code, OpenCode, Crush, Pi, He
 
 ## Current status
 
-The `dev` branch currently declares `POD_AGENTS_VERSION="0.5.6"`. The dashboard-awareness, inbox, and safe LAN sharing milestones have landed: activity states and published pod ports are visible through `/api/stats` after dashboard unlock, operator mode can inspect pod journals, browse batch runs with result summaries and exports, and send new requests into waiting agent terminals from the dashboard, CLI/dashboard inbox queueing is available, operator auth supports a persistent `.env` API key plus passkeys, and the server includes sham `/v1/*` endpoints for agent smoke tests. The active roadplan now starts with 0.6 polish, demoability, notification UX, and dashboard ergonomics.
+The `dev` branch currently declares `POD_AGENTS_VERSION="0.6.0"`. The 0.6 polish-and-demoability release is in progress. Pod templates (`--from-template`), real-time WebSocket log streaming, CPU/MEM sparklines, an autonomous Agent Manager that detects idle pods and advances them via LLM, batch deletion, a tabbed settings UI redesign, editable LLM credentials with hot-reload, and glowing "Managed" badges on automated pods have all landed. The active roadplan now covers the remaining 0.6 items — PWA polish, in-app notifications, per-pod notes/tags, and resource limits — before moving to benchmark suite (0.7) and public 1.0.
 
 ## Architecture
 
@@ -397,10 +397,10 @@ local agent fleets: still shell-native, still rootless-first, but much better at
 showing what agents are doing and letting you steer them from the dashboard.
 The arc through 1.0 is dashboard awareness (0.3, shipped) -> human-in-the-loop
 queueing (0.4, shipped) -> safe LAN sharing and agent smoke tests (0.5.x,
-current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
-1.0.
+shipped) -> polish and demoability (0.6, current) -> benchmark suite (0.7) ->
+public 1.0.
 
-### Shipped: 0.3 through 0.5.6
+### Shipped: 0.3 through 0.6.0
 
 - **0.3 dashboard awareness:** dashboard activity states, the `dev` channel,
   install-dev flow, CI on `main` and `dev`, and the first host-native Go server
@@ -412,8 +412,6 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
   fallback login, passkey registration/login, long-lived HttpOnly sessions,
   same-origin write checks, login rate limiting, conditional secure cookies, and
   audit JSONL for dashboard writes.
-- **0.6 started:** automatic audit log rotation and archive pruning for
-  dashboard write logs, plus dashboard passkey rename/delete management.
 - **0.5.1 agent smoke tests:** built-in OpenAI/Anthropic sham endpoints,
   `pod test <agent>`, `pod test --all`, and agent invocation fixes for the
   current plugin set.
@@ -421,20 +419,24 @@ current) -> polish and demoability (0.6) -> benchmark suite (0.7) -> public
   input and tail following, published pod ports, batch progress/log/export
   controls, and batch result summaries.
 - **0.5.6 permission template:** standardized OpenCode `dangerously-skip-permissions` configuration template.
+- **0.6.0 polish and demoability (in progress):**
+  - Pod templates (`pod start --from-template <name>`) for web-app, research, triage, and refactor workflows.
+  - Real-time WebSocket log/journal streaming with tail-following controls.
+  - CPU/MEM trend sparklines and pulsing activity badges.
+  - Autonomous Agent Manager background daemon with LLM-driven idle pod detection, configurable running hours, and editable system prompt.
+  - Batch run selection persistence and recursive batch deletion.
+  - Tabbed settings UI redesign with flat glowing accent navigation.
+  - Editable LLM credentials (V1 Endpoint, Model, API Key) with hot-reload to `.env`.
+  - Glowing "Managed" badge next to pods overseen by the Agent Manager.
+  - Automatic audit log rotation and archive pruning.
+  - Dashboard passkey rename/delete management.
+  - Dashboard install/update status card.
+  - Async port connectivity checks with green/red indicators.
 
-### 0.6 — polish and demoability
+### 0.6 — remaining items
 
-Everything that turns the working fleet manager into a product you can demo
-cold to a stranger.
-
-- **Pod templates** for common workflows: web-app coding, repo triage, research, batch refactors. `pod start --from-template <name>`.
-- **Mobile-first PWA polish:** install prompt, offline shell, notification center, and quick actions.
-- **Notification foundation:** browser subscription storage, local delivery tests, and rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
-- **Batch dashboard page:** progress, ETA, result summaries, runner logs,
-  export, and stop controls are live.
-- **Dashboard log/journal viewer:** stream `journalctl --user -u <pod>.service` into the dashboard so you don't need shell access to debug a pod.
-- **Auth management polish:** HTTPS helper docs and clearer recovery docs for headless hosts.
-- **Dashboard install/update card:** local version, saved channel, and cached latest `main`/`dev` version status are live.
+- **Mobile-first PWA polish:** install prompt, offline shell, and quick actions.
+- **In-app notification center:** SSE-based real-time delivery with rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
 - **Per-pod notes, tags, and favorite workspaces** stored beside each workspace.
 - **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.
 

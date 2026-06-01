@@ -190,6 +190,8 @@
         local POD_TEMPLATE_BASE=""
         local POD_TEMPLATE_PORTS=""
         local POD_TEMPLATE_WORKSPACE=""
+        local POD_TEMPLATE_MEMORY=""
+        local POD_TEMPLATE_CPU=""
         # shellcheck disable=SC1090
         source "$template_path"
 
@@ -209,6 +211,12 @@
         fi
         if [ -n "$POD_TEMPLATE_WORKSPACE" ] && [ -z "${WORKSPACE_DIR_OVERRIDE:-}" ]; then
             WORKSPACE_DIR_OVERRIDE="$POD_TEMPLATE_WORKSPACE"
+        fi
+        if [ -n "$POD_TEMPLATE_MEMORY" ] && [ -z "${POD_MEMORY_LIMIT:-}" ]; then
+            POD_MEMORY_LIMIT="$POD_TEMPLATE_MEMORY"
+        fi
+        if [ -n "$POD_TEMPLATE_CPU" ] && [ -z "${POD_CPU_LIMIT:-}" ]; then
+            POD_CPU_LIMIT="$POD_TEMPLATE_CPU"
         fi
     fi
 
@@ -272,6 +280,31 @@
             fi
         fi
 
+        local cpu_quota=""
+        if [ -n "${POD_CPU_LIMIT:-}" ]; then
+            if [[ "$POD_CPU_LIMIT" == *.* ]]; then
+                local int_part="${POD_CPU_LIMIT%.*}"
+                local dec_part="${POD_CPU_LIMIT#*.}"
+                if [ "${#dec_part}" -eq 1 ]; then
+                    dec_part="${dec_part}0"
+                elif [ "${#dec_part}" -gt 2 ]; then
+                    dec_part="${dec_part:0:2}"
+                fi
+                local total_pct=$(( (10#$int_part * 100) + 10#$dec_part ))
+                cpu_quota="${total_pct}%"
+            else
+                cpu_quota="$(( POD_CPU_LIMIT * 100 ))%"
+            fi
+        fi
+
+        local service_directives=""
+        if [ -n "${POD_MEMORY_LIMIT:-}" ]; then
+            service_directives+="MemoryMax=${POD_MEMORY_LIMIT}"$'\n'
+        fi
+        if [ -n "$cpu_quota" ]; then
+            service_directives+="CPUQuota=${cpu_quota}"$'\n'
+        fi
+
         local capitalized_agent
         capitalized_agent=$(echo "$agent" | awk '{print toupper(substr($0,1,1))substr($0,2)}')
 
@@ -314,6 +347,7 @@ Exec=sleep infinity
 [Service]
 TimeoutStartSec=15
 ExecStartPre=/usr/bin/mkdir -p ${WORKSPACES_ROOT}/${agent}-pods/%i/workspace ${WORKSPACES_ROOT}/${agent}-pods/%i/config
+${service_directives}
 
 [Install]
 WantedBy=default.target

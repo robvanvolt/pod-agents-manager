@@ -20,6 +20,8 @@
     local WORKSPACE_DIR_OVERRIDE=""
     local PORTS_OVERRIDE=""
     local FROM_TEMPLATE=""
+    local POD_MEMORY_LIMIT=""
+    local POD_CPU_LIMIT=""
     # Build-cache control. NO_CACHE_BUILD=1 forces `podman build --no-cache`
     # so layers like `RUN npm install -g <pkg>` actually re-fetch upstream
     # rather than reusing the cached layer. Set automatically by `pod update`
@@ -36,6 +38,8 @@
                 workspace) WORKSPACE_DIR_OVERRIDE="$_mf_arg" ;;
                 ports) PORTS_OVERRIDE="$_mf_arg" ;;
                 from-template) FROM_TEMPLATE="$_mf_arg" ;;
+                memory) POD_MEMORY_LIMIT="$_mf_arg" ;;
+                cpu) POD_CPU_LIMIT="$_mf_arg" ;;
             esac
             _mf_skip=0
             _mf_expect=""
@@ -47,6 +51,8 @@
             --workspace=*) WORKSPACE_DIR_OVERRIDE="${_mf_arg#--workspace=}" ;;
             --ports=*) PORTS_OVERRIDE="${_mf_arg#--ports=}" ;;
             --from-template=*) FROM_TEMPLATE="${_mf_arg#--from-template=}" ;;
+            --memory=*) POD_MEMORY_LIMIT="${_mf_arg#--memory=}" ;;
+            --cpu=*) POD_CPU_LIMIT="${_mf_arg#--cpu=}" ;;
             # All three spellings are accepted; --api-key is the canonical one
             # shown in help text. Underscore and run-together forms are kept
             # because users naturally type them.
@@ -57,6 +63,8 @@
             --ports) _mf_skip=1; _mf_expect="ports" ;;
             --from-template) _mf_skip=1; _mf_expect="from-template" ;;
             --api-key|--api_key|--apikey) _mf_skip=1; _mf_expect="api_key" ;;
+            --memory)  _mf_skip=1; _mf_expect="memory" ;;
+            --cpu)     _mf_skip=1; _mf_expect="cpu" ;;
             --no-cache) NO_CACHE_BUILD=1 ;;
             --cached)   CACHED_BUILD=1 ;;
             *)         _mf_args+=("$_mf_arg") ;;
@@ -81,6 +89,12 @@
                 ;;
             api_key)
                 echo -e "\033[31m--api-key requires a value (e.g. --api-key sk-... or --api-key=sk-...).\033[0m" >&2
+                ;;
+            memory)
+                echo -e "\033[31m--memory requires a value (e.g. --memory 2G or --memory=2G).\033[0m" >&2
+                ;;
+            cpu)
+                echo -e "\033[31m--cpu requires a value (e.g. --cpu 1.5 or --cpu=1.5).\033[0m" >&2
                 ;;
         esac
         return 1
