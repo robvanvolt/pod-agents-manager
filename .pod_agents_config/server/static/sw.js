@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pod-dashboard-v0.6.0';
+const CACHE_NAME = 'pod-dashboard-v0.6.0-notifications';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -67,6 +67,24 @@ self.addEventListener('fetch', (e) => {
         }
         return networkResponse;
       });
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const targetURL = e.notification.data && e.notification.data.url ? e.notification.data.url : '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          client.navigate(targetURL);
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetURL);
+      }
     })
   );
 });

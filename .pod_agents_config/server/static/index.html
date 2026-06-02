@@ -1902,6 +1902,39 @@
     let notificationSSE = null;
     let notifications = [];
 
+    function systemNotificationsAvailable() {
+      return Boolean(window.isSecureContext && 'Notification' in window && 'serviceWorker' in navigator);
+    }
+
+    async function ensureSystemNotificationPermission() {
+      if (!systemNotificationsAvailable()) return false;
+      if (Notification.permission === 'granted') return true;
+      if (Notification.permission === 'denied') return false;
+      try {
+        return await Notification.requestPermission() === 'granted';
+      } catch (_) {
+        return false;
+      }
+    }
+
+    async function showSystemNotification(n) {
+      if (!await ensureSystemNotificationPermission()) return false;
+      try {
+        const registration = await navigator.serviceWorker.ready;
+        await registration.showNotification(n.title || 'Pod notification', {
+          body: n.message || '',
+          tag: n.id || `${n.type || 'pod'}-${Date.now()}`,
+          icon: './logo.svg',
+          badge: './logo.svg',
+          data: { url: '/', pod: n.pod || '', type: n.type || '' },
+        });
+        return true;
+      } catch (err) {
+        console.warn('system notification failed:', err);
+        return false;
+      }
+    }
+
     function connectNotificationSSE() {
       if (notificationSSE) return;
       if (authState.role !== 'operator') return;
@@ -1914,7 +1947,7 @@
             notifications = notifications.slice(0, 50);
           }
           updateNotificationUI();
-          showToast(`Notification: ${n.title} - ${n.message}`);
+          showSystemNotification(n);
         } catch (_) {}
       };
       notificationSSE.onerror = () => {
@@ -1977,6 +2010,7 @@
     }
 
     function toggleNotificationPanel() {
+      ensureSystemNotificationPermission();
       const panel = document.getElementById('notification-panel');
       if (panel) panel.hidden = !panel.hidden;
     }

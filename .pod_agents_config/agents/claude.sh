@@ -18,7 +18,26 @@ RUN mv /usr/local/bin/claude /usr/local/bin/claude-original && \
     echo 'RAW_KEY=${ANTHROPIC_API_KEY#sk-ant-api03-}' >> /usr/local/bin/claude && \
     echo 'RAW_KEY=${RAW_KEY#sk-ant-}' >> /usr/local/bin/claude && \
     echo 'export FORMATTED_KEY="sk-ant-api03-${RAW_KEY}"' >> /usr/local/bin/claude && \
-    echo 'echo "{\"hasCompletedOnboarding\": true, \"theme\": \"auto\", \"primaryApiKey\": \"$FORMATTED_KEY\"}" > /root/.claude.json' >> /usr/local/bin/claude && \
+    echo 'cat > /root/.claude.json <<EOF_CLAUDE_JSON' >> /usr/local/bin/claude && \
+    echo '{' >> /usr/local/bin/claude && \
+    echo '  "hasCompletedOnboarding": true,' >> /usr/local/bin/claude && \
+    echo '  "theme": "auto",' >> /usr/local/bin/claude && \
+    echo '  "primaryApiKey": "$FORMATTED_KEY",' >> /usr/local/bin/claude && \
+    echo '  "projects": {' >> /usr/local/bin/claude && \
+    echo '    "/workspace": {' >> /usr/local/bin/claude && \
+    echo '      "allowedTools": [],' >> /usr/local/bin/claude && \
+    echo '      "mcpContextUris": [],' >> /usr/local/bin/claude && \
+    echo '      "mcpServers": {},' >> /usr/local/bin/claude && \
+    echo '      "enabledMcpjsonServers": [],' >> /usr/local/bin/claude && \
+    echo '      "disabledMcpjsonServers": [],' >> /usr/local/bin/claude && \
+    echo '      "hasTrustDialogAccepted": true,' >> /usr/local/bin/claude && \
+    echo '      "projectOnboardingSeenCount": 1,' >> /usr/local/bin/claude && \
+    echo '      "hasClaudeMdExternalIncludesApproved": false,' >> /usr/local/bin/claude && \
+    echo '      "hasClaudeMdExternalIncludesWarningShown": false' >> /usr/local/bin/claude && \
+    echo '    }' >> /usr/local/bin/claude && \
+    echo '  }' >> /usr/local/bin/claude && \
+    echo '}' >> /usr/local/bin/claude && \
+    echo 'EOF_CLAUDE_JSON' >> /usr/local/bin/claude && \
     echo 'unset ANTHROPIC_API_KEY' >> /usr/local/bin/claude && \
     echo 'exec claude-original --model "${LLM:-Qwen3.6-35B-A3B-8bit}" --dangerously-skip-permissions "$@"' >> /usr/local/bin/claude && \
     chmod +x /usr/local/bin/claude
@@ -51,6 +70,7 @@ agent_generate_config() {
   },
   "plansDirectory": "./plans",
   "prefersReducedMotion": true,
+  "skipDangerousModePermissionPrompt": true,
   "terminalProgressBarEnabled": false,
   "effortLevel": "high"
 }
