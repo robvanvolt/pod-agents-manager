@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pod-dashboard-v0.6.0-notifications';
+const CACHE_NAME = 'pod-dashboard-v0.6.0-notifications-fab';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

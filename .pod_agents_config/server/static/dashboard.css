@@ -1028,6 +1028,33 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
 }
 
 /* Notification Bell Count */
+.notification-fab {
+    position: fixed;
+    right: 1.25rem;
+    bottom: 1.25rem;
+    z-index: 990;
+    width: 3rem;
+    height: 3rem;
+    min-width: 3rem;
+    padding: 0;
+    border-radius: 999px;
+    background: linear-gradient(135deg, rgba(104, 225, 253, 0.92), rgba(167, 139, 250, 0.9));
+    color: #04111b;
+    border-color: rgba(104, 225, 253, 0.55);
+    box-shadow: 0 14px 36px rgba(3, 7, 18, 0.48), 0 0 24px rgba(104, 225, 253, 0.22);
+}
+.notification-fab:hover {
+    color: #04111b;
+    border-color: rgba(255, 255, 255, 0.55);
+}
+.notification-fab svg {
+    width: 1.15rem;
+    height: 1.15rem;
+}
+.notification-fab[hidden],
+.notification-panel[hidden] {
+    display: none !important;
+}
 .notification-count {
     position: absolute;
     top: -4px;
@@ -1050,8 +1077,8 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
 /* Notification Panel Drawer */
 .notification-panel {
     position: fixed;
-    top: 5.5rem;
     right: 1.25rem;
+    bottom: 5rem;
     width: 360px;
     max-height: 480px;
     background: rgba(13, 21, 36, 0.94);
@@ -1081,6 +1108,17 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     color: var(--text);
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+.notification-panel-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.notification-panel-actions button {
+    width: 2rem;
+    height: 2rem;
+    min-width: 2rem;
+    padding: 0;
 }
 
 .notification-list {
@@ -1155,10 +1193,16 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
 }
 
 @media (max-width: 480px) {
+    .notification-fab {
+        right: 1rem;
+        bottom: 1rem;
+    }
     .notification-panel {
-        right: 8px;
-        left: 8px;
+        right: 1rem;
+        left: 1rem;
+        bottom: 4.75rem;
         width: auto;
+        max-height: min(440px, calc(100vh - 6rem));
     }
 }
 
@@ -1239,6 +1283,5 @@ code { font-family: ui-monospace, monospace; font-size: 12px; opacity: .9; }
     stroke: currentColor;
     stroke-width: 2;
 }
-
 
 

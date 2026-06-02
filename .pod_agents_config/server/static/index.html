@@ -30,10 +30,6 @@
         <span class="chip" id="chip-time"><span class="label">time</span><code id="chip-time-val">…</code></span>
         <button type="button" id="passkey-manage-button" onclick="openPasskeyDialog()" hidden>Passkeys</button>
         <button type="button" id="passkey-register-button" onclick="registerPasskey()" hidden>Register Passkey</button>
-        <button type="button" id="notification-bell" class="icon-btn" title="Notifications" onclick="toggleNotificationPanel()" style="position: relative;" hidden>
-          <span data-icon="bell"></span>
-          <span id="notification-count" class="notification-count" hidden>0</span>
-        </button>
         <button type="button" id="auth-button" onclick="toggleAuth()">Unlock</button>
       </div>
   </div>
@@ -50,12 +46,19 @@
   <div id="notification-panel" class="notification-panel" hidden>
     <div class="notification-panel-header">
       <h3>Notifications</h3>
-      <button type="button" class="icon-btn" onclick="dismissAllNotifications()" title="Dismiss all"><span data-icon="check"></span></button>
+      <div class="notification-panel-actions">
+        <button type="button" class="icon-btn" onclick="dismissAllNotifications()" title="Dismiss all" aria-label="Dismiss all notifications"><span data-icon="check"></span></button>
+        <button type="button" class="icon-btn" onclick="closeNotificationPanel()" title="Close notifications" aria-label="Close notifications">×</button>
+      </div>
     </div>
     <div id="notification-list" class="notification-list">
       <p class="empty-state">No notifications</p>
     </div>
   </div>
+  <button type="button" id="notification-bell" class="icon-btn notification-fab" title="Notifications" aria-label="Notifications" onclick="toggleNotificationPanel()" hidden>
+    <span data-icon="bell"></span>
+    <span id="notification-count" class="notification-count" hidden>0</span>
+  </button>
   <dialog id="auth-dialog" class="auth-dialog">
     <form method="dialog" class="auth-panel" onsubmit="return submitAuthDialog(event)">
       <div class="auth-head">
@@ -2013,6 +2016,11 @@
       ensureSystemNotificationPermission();
       const panel = document.getElementById('notification-panel');
       if (panel) panel.hidden = !panel.hidden;
+    }
+
+    function closeNotificationPanel() {
+      const panel = document.getElementById('notification-panel');
+      if (panel) panel.hidden = true;
     }
 
     async function dismissNotification(id) {
