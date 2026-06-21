@@ -12,10 +12,12 @@
 #
 # Local-LLM routing:
 #   The config.toml this plugin writes registers a `local` model_provider
-#   pointing at $OPENAI_BASE_URL with env_key = "OPENAI_API_KEY", plus a
-#   `local` profile using $DEFAULT_MODEL, plus a top-level `profile = "local"`
-#   so bare `codex` and `codex exec` both default to local inference without
-#   the user having to remember --profile.
+#   pointing at $OPENAI_BASE_URL with env_key = "OPENAI_API_KEY", and selects
+#   it via TOP-LEVEL `model` + `model_provider` keys (NOT a [profiles.*] table).
+#   Recent codex versions (>= 0.140) made the old `profile = "local"` /
+#   `[profiles.local]` scheme "legacy" and incompatible with `--profile local`
+#   ("legacy profile ... is no longer supported"), so this plugin uses the
+#   direct top-level form and AGENT_BATCH_INVOKE drops `--profile`.
 #
 # Safety bypass (mirrors claude.sh):
 #   Codex by default refuses to run outside a trusted git repo and asks for
@@ -32,8 +34,9 @@ AGENT_SKILLS_SUBPATH="skills"
 # Non-interactive prompt mode for `pod batch` and `pod test`. The wrapper
 # installed by agent_build_containerfile auto-adds --skip-git-repo-check and
 # --dangerously-bypass-approvals-and-sandbox, so AGENT_BATCH_INVOKE stays
-# clean: just exec subcommand + --profile + prompt.
-AGENT_BATCH_INVOKE='codex exec --profile local "$PROMPT"'
+# clean. No --profile: the local provider is the top-level default in
+# config.toml (see agent_generate_config + the routing note above).
+AGENT_BATCH_INVOKE='codex exec "$PROMPT"'
 
 agent_build_containerfile() {
     local build_dir="$1"
@@ -113,9 +116,9 @@ agent_generate_config() {
     echo -e "\033[36mGenerating codex config.toml...\033[0m"
     mkdir -p "$config_dir" 2>/dev/null || true
 
-    # Pick the first comma-separated model as the profile's default. Users
-    # can edit ~/.codex/config.toml inside the workspace to add more profiles
-    # or switch models per-conversation with `codex --profile <name>`.
+    # Pick the first comma-separated model as the default. Users can edit
+    # ~/.codex/config.toml in the workspace to point at a different model
+    # or add their own [model_providers.*] block.
     local first_model="${DEFAULT_MODEL%%,*}"
     first_model=$(echo "$first_model" | xargs)
 
@@ -149,10 +152,12 @@ agent_generate_config() {
 # Pod Agents Manager: auto-generated. Edits to this file are preserved by
 # \`pod update\`; they're reset on \`pod start\` / \`pod restart\`.
 
-# Top-level default — \`codex\` and \`codex exec\` use this profile unless
-# overridden with --profile. AGENT_BATCH_INVOKE still passes --profile local
-# explicitly so batch behavior is independent of this default.
-profile = "local"
+# Default model + provider, selected at the TOP LEVEL (not via a
+# [profiles.*] table). codex >= 0.140 rejects the legacy profile scheme with
+# "legacy profile ... is no longer supported", so we bind the local provider
+# directly here. \`codex\` and \`codex exec\` both use it with no --profile.
+model = "${first_model}"
+model_provider = "local"
 
 # Context window for codex's built-in metadata fallback. Sourced from
 # POD_DEFAULT_MODEL_CONTEXT_SIZE in ~/.pod_agents_config/.env.
@@ -170,9 +175,5 @@ trust_level = "trusted"
 name = "Pod Agents local OpenAI-compatible"
 base_url = "${OPENAI_BASE_URL}"
 env_key = "OPENAI_API_KEY"
-
-[profiles.local]
-model_provider = "local"
-model = "${first_model}"
 EOF
 }
