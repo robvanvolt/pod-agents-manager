@@ -4,6 +4,7 @@ Last refreshed: 2026-05-21
 
 | Agent | Links |
 | --- | --- |
+| Antigravity | https://antigravity.google<br>https://github.com/google-antigravity/antigravity-cli |
 | Claude Code | https://code.claude.com/llms.txt<br>https://code.claude.com/docs/llms.txt |
 | Codex | https://developers.openai.com/codex/cli<br>https://developers.openai.com/codex/guides/agents-md<br>https://github.com/openai/codex |
 | Command Code | https://commandcode.ai/docs<br>https://github.com/CommandCodeAI/command-code |
