@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     if [ "$#" -eq 0 ]; then
         local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "test" "uninstall" "quit")
         local selected_action=""
@@ -184,7 +187,8 @@
 
                 for agent_dir in "$WORKSPACES_ROOT/"*-pods; do
                     [ -d "$agent_dir" ] || continue
-                    local current_agent=$(basename "$agent_dir" | sed 's/-pods//')
+                    local current_agent
+                    current_agent=$(basename "$agent_dir" | sed 's/-pods//')
                     for inst_dir in "$agent_dir"/*/; do
                         [ -d "$inst_dir" ] || continue
                         available_pods+=("${current_agent} $(basename "$inst_dir")")

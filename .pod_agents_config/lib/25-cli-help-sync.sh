@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # Version string, help text, and self-update file sync helpers
     if [ -f "$pod_version_file" ]; then
         # shellcheck disable=SC1090

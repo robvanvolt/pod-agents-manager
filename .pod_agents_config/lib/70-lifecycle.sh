@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # ------------------------------------------------------------------------
     # Make host-written agent config files reachable from inside the container.
     #
@@ -410,7 +413,8 @@ EOF
             else
                 # Default: Use all agents, but take only the FIRST running pod of each
                 for a in "${available_agents[@]}"; do
-                    local first_running=$(podman ps --format '{{.Names}}' | grep "^${a}-" | head -n 1)
+                    local first_running
+                    first_running=$(podman ps --format '{{.Names}}' | grep "^${a}-" | head -n 1)
                     if [ -n "$first_running" ]; then
                         local inst="${first_running#${a}-}"
                         target_pods+=("$a:$inst")
@@ -638,7 +642,9 @@ EOF
             systemctl --user disable --now "$service_name" 2>/dev/null || true
             if [ -n "$instance" ] && [[ "$instance" != *"/"* ]] && [[ "$instance" != *"."* ]]; then
                 echo -e "\033[31mNuking workspace data at $workspace_root/${instance}...\033[0m"
-                rm -rf "$workspace_root/${instance}"
+                # ${workspace_root:?} aborts rather than expanding to "/${instance}"
+                # if workspace_root is ever empty — defense-in-depth on rm -rf.
+                rm -rf "${workspace_root:?}/${instance}"
             fi
             ;;
         join|enter)

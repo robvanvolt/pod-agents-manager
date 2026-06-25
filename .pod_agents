@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2034
+# (SC2034: the pod_* locals below are consumed by the lib/ modules this
+#  function sources, which shellcheck can't follow.)
 # Custom Podman/Quadlet Fleet Manager — entrypoint sources modular helpers from ~/.pod_agents_config/lib/
 #
 # The user-facing command name (default `pod`) is configurable so a host that

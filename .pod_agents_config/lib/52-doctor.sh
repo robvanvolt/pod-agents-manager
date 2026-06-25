@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # `pod doctor` — diagnose host setup before users hit confusing errors
     # deep inside `pod start`. Each check prints PASS / WARN / FAIL with a
     # one-line hint. WARN does not fail; FAIL bumps the exit code.

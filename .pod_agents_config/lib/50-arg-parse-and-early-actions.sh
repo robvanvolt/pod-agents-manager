@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # 3. Standard Variables & Execution
     local action=$1
     local agent="${2:-}"

@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # On-side tests: smoke-test every configured agent against the dashboard's
     # built-in OpenAI/Anthropic sham endpoints. Each agent runs against a
     # dedicated `<agent>-shamtest` pod whose config points at the sham server,

@@ -50,24 +50,24 @@ t_syntax_install() { bash -n install.sh; }
 t_syntax_install_dev() { bash -n install-dev.sh; }
 
 # ----- 2. Shellcheck --------------------------------------------------------
-# SC2168 ('local' is only valid in functions) is a known false-positive for
-# the lib files: they are sourced INSIDE the pod() function, which shellcheck
-# cannot infer from a standalone file. We filter only that code from libs.
+# Runs at --severity=WARNING (stricter than error-only). The entrypoint and
+# lib modules carry in-file `# shellcheck shell=bash disable=...` headers that
+# scope-suppress the cross-module false positives (SC2154/SC2168/SC2034: vars
+# and `local`s shared via the enclosing pod() scope), so no --exclude flags are
+# needed here and real warnings are no longer hidden behind error-only.
+# SC1090/SC1091 (dynamic `source` paths) are inherently unresolvable.
 
 t_shellcheck_available() { command -v shellcheck >/dev/null 2>&1; }
 
 t_shellcheck_entrypoint() {
-    # SC2034: locals consumed by sourced libs (false-positive when sourcing).
-    shellcheck -s bash --severity=error --exclude=SC2034 .pod_agents
+    shellcheck -s bash --severity=warning --exclude=SC1090,SC1091 .pod_agents
 }
 
 t_shellcheck_libs() {
-    # Suppress SC2168 because lib files are sourced inside pod().
-    # Suppress SC1090/SC1091 — dynamic source paths.
     local f rc=0
     for f in .pod_agents_config/lib/*.sh; do
-        if ! shellcheck -s bash --severity=error \
-                --exclude=SC2168,SC1090,SC1091 "$f"; then
+        if ! shellcheck -s bash --severity=warning \
+                --exclude=SC1090,SC1091 "$f"; then
             rc=1
         fi
     done
@@ -75,7 +75,7 @@ t_shellcheck_libs() {
 }
 
 t_shellcheck_install() {
-    shellcheck -s bash --severity=error install.sh install-dev.sh
+    shellcheck -s bash --severity=warning --exclude=SC1090,SC1091 install.sh install-dev.sh
 }
 
 # ----- 3. Lib-loader contract ----------------------------------------------

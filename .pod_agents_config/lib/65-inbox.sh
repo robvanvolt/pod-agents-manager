@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     # Human-in-the-loop inbox commands. Entries are append-only JSONL files so
     # the CLI, dashboard, and future notification workers can all share the
     # same lightweight queue without needing a daemon or database.

@@ -1,3 +1,6 @@
+# shellcheck shell=bash disable=SC2154,SC2168,SC2034
+# Sourced as a fragment inside the pod() function in ~/.pod_agents; the
+# variables and `local`s it uses come from that enclosing scope.
     if [ "$action" = "batch" ]; then
         local batch_root="$config_dir_root/batch"
         mkdir -p "$batch_root"
