@@ -13,7 +13,7 @@ func TestValidGitHubRepo(t *testing.T) {
 	}{
 		{"robvanvolt/pod-agents-manager", true},
 		{"Owner_1/repo.name-2", true},
-		{"owner", false},          // no slash
+		{"owner", false},            // no slash
 		{"owner/repo/extra", false}, // too many segments
 		{"owner/", false},
 		{"/repo", false},
@@ -35,11 +35,11 @@ func TestValidInstallRef(t *testing.T) {
 		{"main", true},
 		{"v1.2.3", true},
 		{"feature/pwa-notifications", true},
-		{"", false},          // empty
-		{"..", false},        // pure traversal
-		{"a..b", false},      // contains ..
-		{"-leading", false},  // must start alnum
-		{".hidden", false},   // must start alnum
+		{"", false},         // empty
+		{"..", false},       // pure traversal
+		{"a..b", false},     // contains ..
+		{"-leading", false}, // must start alnum
+		{".hidden", false},  // must start alnum
 		{"with space", false},
 	}
 	for _, c := range cases {

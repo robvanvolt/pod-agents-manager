@@ -813,7 +813,7 @@ func testCOSEES256(privateKey *ecdsa.PrivateKey) []byte {
 
 func TestAgentManagerConfigLoadSave(t *testing.T) {
 	root := t.TempDir()
-	
+
 	// Test load default when not existing
 	cfg := loadAgentManagerConfig(root)
 	if cfg.Enabled {
@@ -859,7 +859,7 @@ func TestIsHourInWindow(t *testing.T) {
 		{14, 2, 13, false},
 		{2, 2, 13, true},
 		{13, 2, 13, true},
-		
+
 		// Wrap around midnight (e.g. 22:00 to 04:00)
 		{23, 22, 4, true},
 		{1, 22, 4, true},
@@ -876,7 +876,7 @@ func TestIsHourInWindow(t *testing.T) {
 func TestBatchDeletionHandler(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now().Format(time.RFC3339)
-	
+
 	// Create operator auth session
 	if err := saveAuthState(root, authState{
 		BootstrapTokenSHA256: tokenHash("secret-token"),
@@ -952,7 +952,7 @@ func TestBatchDeletionHandler(t *testing.T) {
 	deleteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	deleteReq.Header.Set("Origin", "http://example.com") // to satisfy origin check
 	deleteReq.AddCookie(&http.Cookie{Name: "pod_session", Value: session})
-	
+
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, deleteReq)
 
@@ -1130,6 +1130,3 @@ func TestPodMetaLoadSave(t *testing.T) {
 		t.Fatal("expected favorite to be true")
 	}
 }
-
-
-
