@@ -1,14 +1,23 @@
+#!/usr/bin/env bash
 # shellcheck shell=bash disable=SC2034
 # (SC2034: the pod_* locals below are consumed by the lib/ modules this
 #  function sources, which shellcheck can't follow.)
 # Custom Podman/Quadlet Fleet Manager — entrypoint sources modular helpers from ~/.pod_agents_config/lib/
 #
+# This file runs in TWO modes:
+#   • Sourced  (curl|bash installer): `.bashrc` sources it, defining the `pod`
+#     shell function + tab-completion in the interactive shell.
+#   • Executed (Homebrew / standalone): a wrapper on PATH execs this file. It
+#     first materializes ~/.pod_agents_config from the distribution dir
+#     ($POD_AGENTS_DIST_DIR), then runs the command. No shell integration.
+#
 # The user-facing command name (default `pod`) is configurable so a host that
 # already has CocoaPods (also `pod`) can install us under a different name.
-# install.sh writes the chosen name to ~/.pod_agents_config/.cmd_name; this
-# entrypoint defines a thin wrapper under that name on top of the canonical
-# `_pod_agents_main` function. Internal lib re-entries always use the
-# canonical name, so they keep working regardless of what the user picked.
+# install.sh / the brew bootstrap write the chosen name to
+# ~/.pod_agents_config/.cmd_name; this entrypoint defines a thin wrapper under
+# that name on top of the canonical `_pod_agents_main` function. Internal lib
+# re-entries always use the canonical name, so they keep working regardless of
+# what the user picked.
 _pod_agents_main() {
     local config_dir_root="$HOME/.pod_agents_config"
     local config_dir_agents="$config_dir_root/agents"
@@ -52,18 +61,67 @@ _pod_agents_main() {
     fi
 }
 
-# User-facing command name. Defaults to `pod`; install.sh may write a
-# different name (e.g. `pods`) to .cmd_name when the host already has a
-# colliding `pod` binary like CocoaPods.
-_pod_user_cmd_name="$(cat "$HOME/.pod_agents_config/.cmd_name" 2>/dev/null | tr -d '[:space:]')"
-: "${_pod_user_cmd_name:=pod}"
+# Materialize ~/.pod_agents_config from a read-only distribution dir (set by
+# the Homebrew wrapper to the formula's libexec tree). Self-contained — must
+# NOT depend on lib/ modules, since those live in the dir it's seeding.
+# No-op when $POD_AGENTS_DIST_DIR is unset (the curl installer already placed
+# the files). Code dirs (lib, server) are overwritten on a version change so
+# `brew upgrade` takes effect; user content (agents, flavors, skills, volumes,
+# templates, .env) is merged without clobbering.
+_pod_bootstrap_from_dist() {
+    local dist="${POD_AGENTS_DIST_DIR:-}"
+    [ -n "$dist" ] && [ -d "$dist" ] || return 0
 
-# Validate to avoid eval'ing arbitrary content from the file.
-if ! [[ "$_pod_user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
-    echo -e "\033[31mInvalid command name in ~/.pod_agents_config/.cmd_name; falling back to 'pod'.\033[0m" >&2
-    _pod_user_cmd_name="pod"
+    local home_cfg="$HOME/.pod_agents_config"
+    mkdir -p "$home_cfg"
+
+    # Only resync when the distribution version differs from what's installed
+    # (or when lib/ is missing entirely). Keeps every invocation cheap.
+    local dist_ver inst_ver
+    dist_ver="$(grep -h '^POD_AGENTS_VERSION=' "$dist/version.conf" 2>/dev/null | head -1)"
+    inst_ver="$(grep -h '^POD_AGENTS_VERSION=' "$home_cfg/version.conf" 2>/dev/null | head -1)"
+    if [ -d "$home_cfg/lib" ] && [ -n "$dist_ver" ] && [ "$dist_ver" = "$inst_ver" ]; then
+        return 0
+    fi
+
+    # Code dirs: overwrite (managed by the package manager).
+    local d
+    for d in lib server; do
+        [ -d "$dist/$d" ] || continue
+        rm -rf "${home_cfg:?}/$d"
+        cp -R "$dist/$d" "$home_cfg/$d"
+    done
+    # Content dirs: merge, never clobber the user's own files (cp -n).
+    for d in agents flavors skills volumes templates; do
+        [ -d "$dist/$d" ] || continue
+        mkdir -p "$home_cfg/$d"
+        cp -Rn "$dist/$d/." "$home_cfg/$d/" 2>/dev/null || true
+    done
+    cp -f "$dist/version.conf" "$home_cfg/version.conf" 2>/dev/null || true
+    [ -f "$dist/.env.example" ] && cp -f "$dist/.env.example" "$home_cfg/.env.example"
+    # Seed .env once, from the example, if the user has none.
+    [ -f "$home_cfg/.env" ] || { [ -f "$dist/.env.example" ] && cp "$dist/.env.example" "$home_cfg/.env"; }
+    # Default the command name to whatever the wrapper advertises (brew: pod-agents).
+    [ -f "$home_cfg/.cmd_name" ] || printf '%s\n' "${POD_AGENTS_CMD_NAME:-pod-agents}" > "$home_cfg/.cmd_name"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # ── Executed (Homebrew / standalone) ──────────────────────────────────────
+    _pod_bootstrap_from_dist
+    _pod_agents_main "$@"
+    exit $?
+else
+    # ── Sourced (curl|bash installer) ─────────────────────────────────────────
+    # Define the user-facing command + tab-completion in the interactive shell.
+    # `complete` is a bash builtin and only meaningful here.
+    _pod_user_cmd_name="$(cat "$HOME/.pod_agents_config/.cmd_name" 2>/dev/null | tr -d '[:space:]')"
+    : "${_pod_user_cmd_name:=pod}"
+    if ! [[ "$_pod_user_cmd_name" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+        echo -e "\033[31mInvalid command name in ~/.pod_agents_config/.cmd_name; falling back to 'pod'.\033[0m" >&2
+        _pod_user_cmd_name="pod"
+    fi
+    eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
+    # `complete` is bash-only; silence it under zsh / non-interactive shells.
+    complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --from-template --no-cache --cached --all -h -v" "$_pod_user_cmd_name" 2>/dev/null || true
+    unset _pod_user_cmd_name
 fi
-
-eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
-complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --from-template --no-cache --cached --all -h -v" "$_pod_user_cmd_name"
-unset _pod_user_cmd_name

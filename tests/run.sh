@@ -183,6 +183,46 @@ t_entrypoint_handles_sentinel() {
         && grep -qE '\[[[:space:]]+"\$_pod_lib_rc"[[:space:]]+-ne[[:space:]]+99[[:space:]]+\]' .pod_agents
 }
 
+# Homebrew / executable mode: when the entrypoint is EXECUTED (not sourced)
+# with POD_AGENTS_DIST_DIR set, _pod_bootstrap_from_dist must materialize
+# ~/.pod_agents_config from the distribution tree, then run the command.
+# This exercises the whole brew runtime path without podman/brew.
+t_entrypoint_executable_bootstrap() {
+    local home out
+    home=$(mktemp -d)
+    out=$(HOME="$home" POD_AGENTS_DIST_DIR="$PWD/.pod_agents_config" \
+        bash .pod_agents --version 2>&1)
+    if ! printf '%s' "$out" | grep -qE '^pod-agents-manager [0-9]'; then
+        echo "  executed-mode --version failed: $out" >&2
+        rm -rf "$home"; return 1
+    fi
+    # bootstrap must have seeded lib/ and defaulted the command name.
+    if [ ! -d "$home/.pod_agents_config/lib" ] || \
+       [ "$(ls -1 "$home/.pod_agents_config/lib/"*.sh 2>/dev/null | wc -l | tr -d ' ')" = "0" ]; then
+        echo "  bootstrap did not seed lib/" >&2; rm -rf "$home"; return 1
+    fi
+    if [ "$(cat "$home/.pod_agents_config/.cmd_name" 2>/dev/null)" != "pod-agents" ]; then
+        echo "  bootstrap did not default .cmd_name to pod-agents" >&2; rm -rf "$home"; return 1
+    fi
+    rm -rf "$home"
+}
+
+# The standalone completion file (used by the Homebrew install) must carry the
+# same action/flag word list as the inline `complete` in the entrypoint, or
+# tab-completion silently drifts between install methods.
+t_completion_wordlist_matches() {
+    local from_entry from_file
+    from_entry=$(grep -oE 'complete -W "[^"]+"' .pod_agents | head -1 | sed -E 's/complete -W "//; s/"$//')
+    from_file=$(grep -oE 'complete -W "[^"]+"' completions/pod-agents.bash | head -1 | sed -E 's/complete -W "//; s/"$//')
+    if [ -z "$from_entry" ] || [ -z "$from_file" ]; then
+        echo "  could not extract a word list from one of the sources" >&2; return 1
+    fi
+    if [ "$from_entry" != "$from_file" ]; then
+        echo "  completion word list drift between .pod_agents and completions/pod-agents.bash" >&2
+        return 1
+    fi
+}
+
 # `pod --help` previously printed help twice and fell through to lifecycle's
 # "Unknown action" message (because `return 0` from the sourced lib didn't
 # exit pod()). After the sentinel fix it should print the help exactly once.
@@ -896,6 +936,8 @@ run_test "entrypoint sources lib glob"         t_entrypoint_sources_lib_glob
 
 run_test "lib: 'return 99' sentinel present"   t_lib_sentinel_in_every_file
 run_test "entrypoint: handles 99 sentinel"     t_entrypoint_handles_sentinel
+run_test "entrypoint: executable bootstrap"    t_entrypoint_executable_bootstrap
+run_test "completion word list in sync"        t_completion_wordlist_matches
 run_test "smoke: pod --help"                   t_pod_help_runs
 run_test "smoke: pod --help prints once"       t_pod_help_no_double_print
 run_test "smoke: pod --version"                t_pod_version_runs
