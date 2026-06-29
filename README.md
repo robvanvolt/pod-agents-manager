@@ -111,6 +111,18 @@ bash ./install.sh
 exec bash -l
 ```
 
+Or via Homebrew (installs as `pod-agents` to avoid shadowing CocoaPods; `alias pod=pod-agents` if the name is free):
+
+```bash
+brew install robvanvolt/tap/pod-agents-manager
+pod-agents doctor
+```
+
+The `curl | bash` installer is the most aligned with the project's "no extra
+runtimes" ethos and is the recommended path; the tap is a convenience for
+Homebrew users. Tap setup lives in
+[`packaging/homebrew/`](packaging/homebrew/README.md).
+
 Development channel install from the `dev` branch:
 
 ```bash
