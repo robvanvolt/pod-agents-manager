@@ -431,7 +431,7 @@ public 1.0.
   input and tail following, published pod ports, batch progress/log/export
   controls, and batch result summaries.
 - **0.5.6 permission template:** standardized OpenCode `dangerously-skip-permissions` configuration template.
-- **0.6.0 polish and demoability (in progress):**
+- **0.6.0 polish and demoability:**
   - Pod templates (`pod start --from-template <name>`) for web-app, research, triage, and refactor workflows.
   - Real-time WebSocket log/journal streaming with tail-following controls.
   - CPU/MEM trend sparklines and pulsing activity badges.
@@ -444,13 +444,13 @@ public 1.0.
   - Dashboard passkey rename/delete management.
   - Dashboard install/update status card.
   - Async port connectivity checks with green/red indicators.
-
-### 0.6 — remaining items
-
-- **Mobile-first PWA polish:** install prompt, offline shell, and quick actions.
-- **In-app notification center:** SSE-based real-time delivery with rule definitions for "pod became idle", "batch completed", "agent asks a question", and "pod failed".
-- **Per-pod notes, tags, and favorite workspaces** stored beside each workspace.
-- **Per-pod resource limits.** Quadlet already supports `MemoryMax=`, `CPUQuota=`, etc. — surface them through `pod start --memory 2G --cpu 1.5` and the dashboard create form.
+  - Mobile-first PWA polish: manifest, service worker, install prompt.
+  - In-app notification center with SSE real-time delivery ("pod became idle", "batch completed", "agent asks a question", "pod failed").
+  - Per-pod notes and tags stored beside each workspace.
+  - Per-pod resource limits: `pod start --memory 2G --cpu 1.5` (Quadlet `MemoryMax=`/`CPUQuota=`) and the dashboard create form.
+  - New agents: Codex, Command Code, Antigravity, codehamr — plus TRACES.md documenting every agent's on-disk history format.
+  - Homebrew tap packaging (dual-mode entrypoint; `brew install robvanvolt/tap/pod-agents-manager`).
+  - Go server split into topical files; shellcheck warning-clean; expanded test suite.
 
 ### 0.7 — benchmark suite and agent comparison
 
@@ -519,7 +519,7 @@ bash tests/run.sh
 
 The suite covers `bash -n` syntax, `shellcheck` errors, the lib loader contract (numeric prefixes + sentinel exit codes), install/self-update regression guards, sandboxed smoke tests for `--help` / `--version` / `doctor`, helper-function unit tests, and a regression check that `pod --version` matches `version.conf`. CI also runs the Go server tests for auth, audit, activity parsing, terminal helpers, inbox storage, and the sham endpoint.
 
-The current roadplan lives in [docs/ROADMAP-0.3.md](docs/ROADMAP-0.3.md).
+The current roadmap lives in the [Roadmap section](#roadmap) above; superseded planning docs are archived under [docs/archive/](docs/archive/).
 
 **Releasing.** `.pod_agents_config/version.conf` is the single source of truth for the version. Bumping it (for example, `0.5.5` to `0.5.6`), committing, and pushing is the release flow — the version badge in this README is read live from that file, and the test suite asserts `pod --version` agrees with it.
 

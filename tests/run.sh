@@ -661,6 +661,52 @@ t_pod_errors_when_lib_missing() {
 # ----- 6. Helper-function unit tests ---------------------------------------
 # Source pod once to define the inner helpers globally, then exercise them.
 
+# _pod_version_lt drives the self-update downgrade guard: the release
+# channel (main) can lag a dev/rsync install, and offering to "update"
+# 0.6.0 → 0.2.6 would clobber newer code. Exercise ordering, equality,
+# missing components, and the historical letter-suffix scheme (0.2.2n).
+t_version_lt_unit() {
+    local sandbox
+    sandbox=$(setup_sandbox)
+    HOME="$sandbox" bash --noprofile --norc -c '
+        set -u
+        tmp_entry=$(mktemp)
+        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
+        # shellcheck disable=SC1090
+        source "$tmp_entry"
+        rm -f "$tmp_entry"
+        pod --version >/dev/null
+
+        rc=0
+        expect_lt() {  # A < B must hold
+            _pod_version_lt "$1" "$2" || { echo "  expected $1 < $2" >&2; rc=1; }
+        }
+        expect_not_lt() {  # A < B must NOT hold
+            _pod_version_lt "$1" "$2" && { echo "  expected NOT $1 < $2" >&2; rc=1; }
+        }
+
+        expect_lt     0.2.6   0.6.0
+        expect_lt     0.5.9   0.6.0
+        expect_lt     0.6.0   0.6.1
+        expect_lt     0.6.0   1.0.0
+        expect_lt     0.9.9   0.10.0     # numeric, not lexical
+        expect_lt     0.2.2   0.2.2n     # bare < suffixed
+        expect_lt     0.2.2a  0.2.2n     # suffix ordering
+        expect_lt     0.6     0.6.1      # missing component = 0
+
+        expect_not_lt 0.6.0   0.6.0      # equal
+        expect_not_lt 0.6.0   0.6        # 0.6 == 0.6.0, not less
+        expect_not_lt 0.6.0   0.2.6      # reversed
+        expect_not_lt 0.2.2n  0.2.2      # reversed suffix
+        expect_not_lt 0.10.0  0.9.9
+
+        exit "$rc"
+    '
+    local rc=$?
+    rm -rf "$sandbox"
+    return "$rc"
+}
+
 t_helpers_unit() {
     local sandbox
     sandbox=$(setup_sandbox)
@@ -964,6 +1010,7 @@ run_test "api-key flag: --api-key=VAL parses"     t_api_key_hyphen_eq_form_parse
 run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_errors
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
+run_test "unit: _pod_version_lt ordering"      t_version_lt_unit
 run_test "template: start --from-template resolution" t_pod_template_resolution
 run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options

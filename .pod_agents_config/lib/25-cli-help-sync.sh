@@ -12,6 +12,33 @@
         printf 'pod-agents-manager %s\n' "$POD_AGENTS_VERSION"
     }
 
+    # _pod_version_lt A B — returns 0 (true) iff version A < B.
+    # Pure bash (macOS `sort` has no -V). Dot-separated components are
+    # compared numerically; a non-numeric suffix within a component (the
+    # historical 0.2.2n style) breaks ties lexically, with "no suffix"
+    # sorting before any suffix (0.2.2 < 0.2.2a). Missing components are 0
+    # (0.6 == 0.6.0).
+    _pod_version_lt() {
+        [ "$1" = "$2" ] && return 1
+        local IFS=. i x y xn yn xs ys
+        local -a a b
+        read -ra a <<< "$1"
+        read -ra b <<< "$2"
+        for (( i=0; i<${#a[@]} || i<${#b[@]}; i++ )); do
+            x="${a[i]:-0}"; y="${b[i]:-0}"
+            xn="${x%%[!0-9]*}"; yn="${y%%[!0-9]*}"
+            xs="${x#"$xn"}";    ys="${y#"$yn"}"
+            : "${xn:=0}" "${yn:=0}"
+            if [ "$xn" -ne "$yn" ] 2>/dev/null; then
+                [ "$xn" -lt "$yn" ] && return 0 || return 1
+            fi
+            if [ "$xs" != "$ys" ]; then
+                [[ "$xs" < "$ys" ]] && return 0 || return 1
+            fi
+        done
+        return 1
+    }
+
     _pod_print_help() {
         local _cmd="${user_cmd_name:-pod}"
         cat <<EOF

@@ -62,6 +62,17 @@
             return 0
         fi
 
+        # Downgrade guard: the release channel (usually `main`) can lag a
+        # dev-channel or rsync'd install. A bare inequality check used to
+        # offer to "update" 0.6.0 → 0.2.6 — refuse instead of clobbering a
+        # newer install with older code.
+        if _pod_version_lt "$remote_version" "$POD_AGENTS_VERSION"; then
+            rm -rf "$tmp_dir"
+            echo -e "\033[33mInstalled version ${POD_AGENTS_VERSION} is newer than the release channel's ${remote_version} — skipping to avoid a downgrade.\033[0m"
+            echo -e "\033[36mIf you really want that version: POD_AGENTS_REF=<tag-or-branch> ${user_cmd_name:-pod} self-update\033[0m"
+            return 0
+        fi
+
         echo -e "\033[36mNew version found. Update from \033[1m${POD_AGENTS_VERSION}\033[0m\033[36m → \033[1m${remote_version}\033[0m\033[36m?\033[0m"
         if ! _pod_prompt_yes_no "Apply update?"; then
             rm -rf "$tmp_dir"
