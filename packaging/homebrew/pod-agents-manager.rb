@@ -13,7 +13,7 @@ class PodAgentsManager < Formula
   homepage "https://github.com/robvanvolt/pod-agents-manager"
   url "https://github.com/robvanvolt/pod-agents-manager/archive/refs/tags/v0.6.0.tar.gz"
   # Replace on each release: `shasum -a 256 v0.6.0.tar.gz`
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "84bc69d7acee49d9fc9e2405629e29ef9b18a215ea23033cd3c2b2bbaede9930"
   license "Apache-2.0"
   head "https://github.com/robvanvolt/pod-agents-manager.git", branch: "main"
 
