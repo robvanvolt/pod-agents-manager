@@ -11,9 +11,9 @@
 class PodAgentsManager < Formula
   desc "Rootless Podman + Quadlet fleet manager for local AI coding agents"
   homepage "https://github.com/robvanvolt/pod-agents-manager"
-  url "https://github.com/robvanvolt/pod-agents-manager/archive/refs/tags/v0.6.0.tar.gz"
-  # Replace on each release: `shasum -a 256 v0.6.0.tar.gz`
-  sha256 "84bc69d7acee49d9fc9e2405629e29ef9b18a215ea23033cd3c2b2bbaede9930"
+  url "https://github.com/robvanvolt/pod-agents-manager/archive/refs/tags/v0.6.1.tar.gz"
+  # Replace on each release: `shasum -a 256 v0.6.1.tar.gz`
+  sha256 "6486ca14c68e20aac70ab308d39529454d2a25da1ea2aeecaf8c9c9b6d9ed79e"
   license "Apache-2.0"
   head "https://github.com/robvanvolt/pod-agents-manager.git", branch: "main"
 
