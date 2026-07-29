@@ -2,7 +2,7 @@
 # Sourced as a fragment inside the pod() function in ~/.pod_agents; the
 # variables and `local`s it uses come from that enclosing scope.
     if [ "$#" -eq 0 ]; then
-        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "test" "uninstall" "quit")
+        local options=("start" "stop" "restart" "update" "self-update" "prebuild" "status" "stats" "remove" "delete" "remove-all" "delete-all" "join" "enter" "it" "tmux" "config" "batch" "inbox" "instruct" "ask" "server" "base" "cache-clean" "doctor" "test" "bench" "uninstall" "quit")
         local selected_action=""
         
         while true; do
@@ -26,6 +26,32 @@
             quit) echo "Exiting."; return 0 ;;
             cache-clean) _pod_agents_main cache-clean; return $? ;;
             doctor) _pod_agents_main doctor; return $? ;;
+            bench)
+                local bench_options=("list" "run" "results" "export")
+                echo -e "\033[36mBench action:\033[0m"
+                local original_ps3="$PS3"
+                PS3="Action: "
+                select bna in "${bench_options[@]}" "Cancel"; do
+                    [ "$bna" = "Cancel" ] && { PS3="$original_ps3"; return 0; }
+                    [ -z "$bna" ] && continue
+                    PS3="$original_ps3"
+                    case "$bna" in
+                        list) _pod_agents_main bench list; return $? ;;
+                        run|results|export)
+                            _pod_agents_main bench list
+                            read -p "Task name: " bn_task
+                            [ -z "$bn_task" ] && { echo "Action canceled."; return 0; }
+                            if [ "$bna" = "run" ]; then
+                                read -p "Agent (blank = all running pods): " bn_agent
+                                _pod_agents_main bench run "$bn_task" $bn_agent
+                            else
+                                _pod_agents_main bench "$bna" "$bn_task"
+                            fi
+                            return $?
+                            ;;
+                    esac
+                done
+                ;;
             remove-all) _pod_agents_main remove --all; return $? ;;
             delete-all) _pod_agents_main delete --all; return $? ;;
             self-update) _pod_agents_main self-update; return $? ;;
