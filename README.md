@@ -9,7 +9,7 @@
 [![Version](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Frobvanvolt%2Fpod-agents-manager%2Fmain%2F.pod_agents_config%2Fversion.conf&search=POD_AGENTS_VERSION%3D%22%28%5B%5E%22%5D%2B%29%22&replace=%241&label=version&color=informational)](.pod_agents_config/version.conf)
 [![Tests](https://github.com/robvanvolt/pod-agents-manager/actions/workflows/tests.yml/badge.svg)](https://github.com/robvanvolt/pod-agents-manager/actions/workflows/tests.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-68e1fd.svg)](https://robvanvolt.github.io/pod-agents-manager/)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-68e1fd.svg)](https://robvanvolt.github.io/pod-agents-manager/docs.html)
 [![Shell: Bash](https://img.shields.io/badge/Shell-Bash-1f425f.svg)](https://www.gnu.org/software/bash/)
 [![Container: Podman](https://img.shields.io/badge/Container-Podman-892ca0.svg)](https://podman.io/)
 

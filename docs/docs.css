@@ -1,0 +1,215 @@
+/* Documentation page layout — extends styles.css (same palette + components).
+   Only adds what the reference page needs: a sticky sidebar TOC, dense
+   tables, callouts, and prose rhythm. */
+
+.docs-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+    gap: 2.5rem;
+    max-width: var(--content);
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+    align-items: start;
+}
+
+/* ── Sidebar TOC ───────────────────────────────────────────────────────── */
+.docs-sidebar {
+    position: sticky;
+    top: 5.5rem;
+    max-height: calc(100vh - 7rem);
+    overflow-y: auto;
+    /* keep the scrollbar from crowding the links */
+    padding-right: 0.35rem;
+}
+
+.docs-toc-title {
+    margin: 0 0 0.6rem;
+    color: var(--brand);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.docs-toc ol {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: toc;
+    border-left: 1px solid var(--panel-border);
+}
+
+.docs-toc li { counter-increment: toc; }
+
+.docs-toc a {
+    display: block;
+    padding: 0.4rem 0.75rem;
+    margin-left: -1px;
+    border-left: 2px solid transparent;
+    color: var(--muted);
+    font-size: 0.86rem;
+    line-height: 1.35;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.docs-toc a::before {
+    content: counter(toc) ".";
+    margin-right: 0.45rem;
+    opacity: 0.5;
+    font-variant-numeric: tabular-nums;
+}
+
+.docs-toc a:hover,
+.docs-toc a:focus-visible {
+    color: var(--text);
+    border-left-color: var(--brand);
+}
+
+/* ── Main column ───────────────────────────────────────────────────────── */
+.docs-main { min-width: 0; }
+
+.docs-section {
+    padding: 0 0 3.25rem;
+    scroll-margin-top: 5.5rem; /* clear the sticky header on anchor jumps */
+}
+
+.docs-section + .docs-section {
+    border-top: 1px solid var(--panel-border);
+    padding-top: 2.75rem;
+}
+
+.docs-main h1 { font-size: clamp(2rem, 4vw, 2.9rem); }
+.docs-main h2 { font-size: clamp(1.5rem, 2.6vw, 2.05rem); margin-bottom: 0.9rem; }
+
+.docs-main h3 {
+    margin: 2rem 0 0.7rem;
+    font-size: 1.05rem;
+    color: var(--text);
+}
+
+.docs-main p { margin: 0 0 1rem; line-height: 1.72; }
+
+.docs-lede {
+    color: #c4d0e4;
+    font-size: clamp(1.02rem, 1.6vw, 1.18rem);
+}
+
+.docs-main > .docs-section > .code-card,
+.docs-main > .docs-section > .batch-panel {
+    margin: 0 0 1.25rem;
+}
+
+/* ── Lists ─────────────────────────────────────────────────────────────── */
+.docs-list,
+.docs-steps {
+    margin: 0 0 1.25rem;
+    padding-left: 1.35rem;
+    color: var(--muted);
+    line-height: 1.72;
+}
+
+.docs-list li,
+.docs-steps li { margin-bottom: 0.45rem; }
+
+.docs-list { list-style: disc; }
+.docs-steps { list-style: decimal; }
+
+.docs-list code,
+.docs-steps code { color: #d9f7ff; }
+
+/* ── Callout ───────────────────────────────────────────────────────────── */
+.docs-callout {
+    margin: 0 0 1.4rem;
+    border: 1px solid rgba(104, 225, 253, 0.28);
+    border-left: 3px solid var(--brand);
+    border-radius: 0.7rem;
+    background: rgba(104, 225, 253, 0.06);
+    padding: 0.9rem 1.05rem;
+    color: #c9d8ec;
+    font-size: 0.93rem;
+    line-height: 1.68;
+}
+
+.docs-callout strong { color: var(--text); }
+
+/* ── Tables ────────────────────────────────────────────────────────────── */
+/* Wrapper scrolls horizontally so wide tables never widen the page itself. */
+.docs-table-wrap {
+    margin: 0 0 1.4rem;
+    overflow-x: auto;
+    border: 1px solid var(--panel-border);
+    border-radius: 0.8rem;
+    background: rgba(15, 23, 42, 0.32);
+}
+
+.docs-table {
+    width: 100%;
+    min-width: 34rem;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+}
+
+.docs-table th,
+.docs-table td {
+    padding: 0.62rem 0.85rem;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.13);
+}
+
+.docs-table thead th {
+    background: rgba(15, 23, 42, 0.72);
+    color: #c7d5ec;
+    font-size: 0.74rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.docs-table tbody tr:last-child td { border-bottom: 0; }
+.docs-table tbody tr:hover { background: rgba(104, 225, 253, 0.04); }
+
+.docs-table td { color: var(--muted); line-height: 1.6; }
+.docs-table td:first-child { color: var(--text); }
+.docs-table code { white-space: nowrap; }
+/* Multi-line cells (stacked env vars) need to wrap, not overflow. */
+.docs-table td code + br + code { white-space: normal; }
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+    .docs-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+        padding-top: 1.75rem;
+    }
+
+    /* Collapse the TOC into a scrollable card above the content. */
+    .docs-sidebar {
+        position: static;
+        max-height: none;
+        border: 1px solid var(--panel-border);
+        border-radius: 0.8rem;
+        background: rgba(15, 23, 42, 0.4);
+        padding: 1rem;
+    }
+
+    .docs-toc ol {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        border-left: 0;
+    }
+
+    .docs-toc a {
+        border-left: 0;
+        padding: 0.3rem 0;
+    }
+
+    .docs-toc a:hover,
+    .docs-toc a:focus-visible { border-left: 0; }
+}
+
+@media (max-width: 640px) {
+    .docs-layout { padding-left: 1rem; padding-right: 1rem; }
+    .docs-table { min-width: 26rem; }
+}

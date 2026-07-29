@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Documentation - Pod Agents Manager</title>
+  <meta name="description" content="Reference documentation for Pod Agents Manager: install, configuration, the full command surface, agent plugins, skills, batch prompting, benchmarks, and the LAN dashboard.">
+  <meta name="theme-color" content="#101827">
+  <meta property="og:title" content="Pod Agents Manager - Documentation">
+  <meta property="og:description" content="Reference documentation: install, configuration, commands, agent plugins, skills, batch, benchmarks, and the LAN dashboard.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://robvanvolt.github.io/pod-agents-manager/docs.html">
+  <meta property="og:image" content="https://robvanvolt.github.io/pod-agents-manager/social-card.svg">
+  <link rel="canonical" href="https://robvanvolt.github.io/pod-agents-manager/docs.html">
+  <link rel="icon" href="./logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./docs.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header" data-elevate>
+    <nav class="nav" aria-label="Primary navigation">
+      <a class="brand" href="./index.html" aria-label="Pod Agents Manager home">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="./logo.svg" alt="">
+        </span>
+        <span>
+          <strong>Pod Agents Manager</strong>
+          <small>documentation</small>
+        </span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links">
+        <span>Menu</span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="./index.html">Home</a>
+        <a href="#install">Install</a>
+        <a href="#configuration">Config</a>
+        <a href="#commands">Commands</a>
+        <a href="#agents">Agents</a>
+        <a class="github-link" href="https://github.com/robvanvolt/pod-agents-manager">GitHub</a>
+      </div>
+    </nav>
+  </header>
+
+  <div class="docs-layout">
+    <aside class="docs-sidebar" aria-label="Documentation contents">
+      <nav class="docs-toc">
+        <p class="docs-toc-title">Contents</p>
+        <ol>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#requirements">Requirements</a></li>
+          <li><a href="#install">Installation</a></li>
+          <li><a href="#concepts">Core concepts</a></li>
+          <li><a href="#configuration">Configuration</a></li>
+          <li><a href="#commands">Command reference</a></li>
+          <li><a href="#agents">Agent plugins</a></li>
+          <li><a href="#skills">Skills</a></li>
+          <li><a href="#templates">Templates &amp; flavors</a></li>
+          <li><a href="#batch">Batch prompting</a></li>
+          <li><a href="#bench">Benchmarks</a></li>
+          <li><a href="#dashboard">Dashboard &amp; auth</a></li>
+          <li><a href="#traces">Agent traces</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+          <li><a href="#upgrading">Upgrading</a></li>
+        </ol>
+      </nav>
+    </aside>
+
+    <main id="main" class="docs-main">
+
+      <!-- ── Overview ────────────────────────────────────────────────── -->
+      <section class="docs-section" id="overview">
+        <p class="section-kicker">Overview</p>
+        <h1>Pod Agents Manager documentation</h1>
+        <p class="docs-lede">
+          <code>pod</code> turns a Linux box with rootless Podman into a multi-tenant home for
+          local AI coding agents. Each agent instance runs in its own container with a
+          persistent workspace, talks to your own OpenAI-compatible inference server, and is
+          driven from one shell command or a LAN dashboard.
+        </p>
+        <div class="docs-callout">
+          <strong>Mental model.</strong> One <em>agent</em> (claude, codex, pi, …) can have many
+          <em>instances</em> (dev, alpha, …). Each instance is one container plus one workspace
+          directory on the host. Nothing is shared between instances except read-only skills.
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>Shell-native</h3>
+            <p>One Bash function, no daemon. Quadlet generates systemd units; Podman runs them rootless as your user.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Bring your own model</h3>
+            <p>Any OpenAI-compatible endpoint — llama.cpp, vLLM, LM Studio, Ollama, MLX. No cloud account required.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Drop-in extensions</h3>
+            <p>Agents, flavors, volume bundles, skills, templates, and benchmark tasks are all files in a directory.</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ── Requirements ────────────────────────────────────────────── -->
+      <section class="docs-section" id="requirements">
+        <p class="section-kicker">Requirements</p>
+        <h2>What you need</h2>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Component</th><th>Minimum</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>Linux</td><td>any modern distro</td><td>Tested on Debian 12, Ubuntu 22.04+, Fedora 39+. Pods need systemd, so this is the runtime host.</td></tr>
+              <tr><td>Podman</td><td>4.4+ (5.8+ ideal)</td><td>Rootless. <code>pod</code> masks the buggy <code>podman-user-wait-network-online.service</code> on 5.0–5.7 automatically.</td></tr>
+              <tr><td>systemd (user)</td><td>required</td><td>Quadlet turns <code>*.container</code> templates into user units. Run <code>loginctl enable-linger $USER</code> so pods survive logout.</td></tr>
+              <tr><td>Bash</td><td>4+ on the host</td><td>The lint/test suite also runs on macOS Bash 3.2 for development.</td></tr>
+              <tr><td><code>tmux</code></td><td>optional</td><td>Needed for <code>pod tmux</code> and <code>pod batch tmux</code>.</td></tr>
+              <tr><td><code>jq</code></td><td>optional</td><td>Needed for <code>pod bench</code> scoring and JSON/CSV export.</td></tr>
+              <tr><td>Go</td><td>not required</td><td>The dashboard binary is built in a throwaway <code>golang:alpine</code> container if Go is missing.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          You also need an <strong>OpenAI-compatible inference endpoint</strong>. On first run,
+          missing <code>POD_*</code> values are prompted once and saved to
+          <code>~/.pod_agents_config/.env</code>.
+        </p>
+      </section>
+
+      <!-- ── Install ─────────────────────────────────────────────────── -->
+      <section class="docs-section" id="install">
+        <p class="section-kicker">Installation</p>
+        <h2>Three ways to install</h2>
+
+        <h3>1. Stable channel (recommended)</h3>
+        <p>The installer places <code>~/.pod_agents</code>, seeds <code>~/.pod_agents_config/</code>, and adds one source line to your shell rc.</p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>curl | bash</span>
+            <button class="copy-button" type="button" data-copy-target="doc-install-stable">Copy</button>
+          </div>
+          <pre><code id="doc-install-stable">curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/main/install.sh | bash
+exec bash -l
+pod doctor</code></pre>
+        </div>
+        <div class="docs-callout">
+          <strong>Name collision?</strong> If <code>pod</code> is already taken (CocoaPods), the
+          installer offers a different name and records it in
+          <code>~/.pod_agents_config/.cmd_name</code>. Non-interactive installs can set
+          <code>POD_AGENTS_CMD=pods</code> beforehand. Every help message adapts to the name you chose.
+        </div>
+
+        <h3>2. Homebrew</h3>
+        <p>Installs as <code>pod-agents</code> so it never shadows CocoaPods. First run materializes your config tree; <code>brew upgrade</code> refreshes the code but keeps your <code>.env</code> and custom plugins.</p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>brew</span>
+            <button class="copy-button" type="button" data-copy-target="doc-install-brew">Copy</button>
+          </div>
+          <pre><code id="doc-install-brew">brew install robvanvolt/tap/pod-agents-manager
+pod-agents doctor
+
+# optional shorter name
+echo 'alias pod=pod-agents' &gt;&gt; ~/.bashrc</code></pre>
+        </div>
+
+        <h3>3. Development channel</h3>
+        <p>Tracks the <code>dev</code> branch. Use this to try unreleased work; expect churn.</p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>dev channel</span>
+            <button class="copy-button" type="button" data-copy-target="doc-install-dev">Copy</button>
+          </div>
+          <pre><code id="doc-install-dev">curl -fsSL https://raw.githubusercontent.com/robvanvolt/pod-agents-manager/dev/install-dev.sh | bash
+exec bash -l</code></pre>
+        </div>
+
+        <h3>First session</h3>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>getting started</span>
+            <button class="copy-button" type="button" data-copy-target="doc-first-session">Copy</button>
+          </div>
+          <pre><code id="doc-first-session">pod doctor              # verify podman, systemd, config, endpoint
+pod config              # set or change POD_* values interactively
+pod prebuild            # (optional) build every agent image up front
+pod start pi dev        # create and start one pod
+pod join pi dev         # attach to its tmux session
+pod delete pi dev       # stop it and remove the workspace</code></pre>
+        </div>
+      </section>
+
+      <!-- ── Concepts ────────────────────────────────────────────────── -->
+      <section class="docs-section" id="concepts">
+        <p class="section-kicker">Core concepts</p>
+        <h2>How it fits together</h2>
+        <p>
+          Everything lives in two trees: a config tree you own, and one workspace directory per
+          pod. There is no database and no daemon — state is files plus systemd units.
+        </p>
+        <div class="batch-panel">
+<pre><code>~/.pod_agents                       the CLI itself (a sourced Bash function)
+~/.pod_agents_config/
+  .env                              your POD_* settings
+  version.conf                      single source of truth for the version
+  lib/NN-*.sh                       numbered CLI modules, sourced in order
+  agents/&lt;name&gt;.sh                  agent plugins        → one CLI verb each
+  flavors/*.containerfile           optional image layers
+  volumes/*.volumes                 reusable mount bundles
+  skills/&lt;skill&gt;/                   shared, read-only-mounted skills
+  templates/*.conf                  preset pod configurations
+  benchmarks/&lt;task&gt;/                benchmark task definitions
+  batch/&lt;id&gt;/                       batch state, logs, progress
+  server/                           Go LAN dashboard
+
+~/Developer/&lt;agent&gt;-pods/&lt;instance&gt;/
+  workspace/                        ↔ mounted at /workspace in the pod
+  config/                           ↔ mounted at the agent's config path
+
+~/.config/containers/systemd/&lt;agent&gt;@.container    Quadlet unit template</code></pre>
+        </div>
+
+        <h3>Lifecycle of <code>pod start pi dev</code></h3>
+        <ol class="docs-steps">
+          <li>Build the image if missing — base image + chosen flavor + the agent's install steps, cached under <code>~/.cache/podman-containers/</code>.</li>
+          <li>Render a Quadlet <code>pi@.container</code> template with your volumes, ports, limits, and endpoint env vars.</li>
+          <li><code>systemctl --user daemon-reload</code> (only when the template actually changed) so Quadlet materializes the unit.</li>
+          <li>Generate the agent's config file into the instance's <code>config/</code> directory.</li>
+          <li><code>systemctl --user start pi@dev.service</code> — the pod is now running as <code>pi-dev</code>.</li>
+        </ol>
+
+        <div class="docs-callout">
+          <strong>Data safety.</strong> <code>pod remove</code> disables the service but leaves the
+          workspace on disk. <code>pod delete</code> removes the workspace too. Only
+          <code>delete</code> destroys work.
+        </div>
+
+        <h3>The positional contract</h3>
+        <p>Every action takes the same shape, and anything past the action is optional:</p>
+        <div class="batch-panel">
+<pre><code>pod &lt;action&gt; [agent] [instance] [flavor] [volumes] [base]
+            [--model NAME] [--endpoint URL] [--api-key KEY]
+            [--ports HOST:CONTAINER[,...]] [--from-template NAME]
+            [--memory VALUE] [--cpu VALUE] [--no-cache | --cached]</code></pre>
+        </div>
+        <p>Running <code>pod</code> with no arguments opens an interactive menu that prompts for whatever is missing.</p>
+      </section>
+
+      <!-- ── Configuration ───────────────────────────────────────────── -->
+      <section class="docs-section" id="configuration">
+        <p class="section-kicker">Configuration</p>
+        <h2>Environment reference</h2>
+        <p>
+          All settings live in <code>~/.pod_agents_config/.env</code> as <code>POD_*</code>
+          variables. Edit the file directly or run <code>pod config</code>. Values are also
+          exported into every pod (without the prefix) so agents can read them.
+        </p>
+
+        <h3>Core</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>POD_OPENAI_BASE_URL</code></td><td>—</td><td>Your inference endpoint, <strong>including</strong> the trailing <code>/v1</code>.</td></tr>
+              <tr><td><code>POD_OPENAI_API_KEY</code></td><td>—</td><td>Key sent as <code>Authorization: Bearer</code>. Any non-empty string works for most local servers.</td></tr>
+              <tr><td><code>POD_DEFAULT_MODEL</code></td><td>—</td><td>Model id. Comma-separate to offer several; the first is the default.</td></tr>
+              <tr><td><code>POD_DEFAULT_MODEL_CONTEXT_SIZE</code></td><td><code>131072</code></td><td>Context window declared to agents that need it (for example Codex's <code>model_context_window</code>).</td></tr>
+              <tr><td><code>POD_BASE_IMAGE</code></td><td><code>alpine</code></td><td><code>alpine</code>, <code>trixie-slim</code>, or an explicit image reference.</td></tr>
+              <tr><td><code>POD_WORKSPACES_ROOT</code></td><td><code>$HOME/Developer</code></td><td>Where <code>&lt;agent&gt;-pods/&lt;instance&gt;/</code> directories are created.</td></tr>
+              <tr><td><code>POD_IMAGE_CACHE_ROOT</code></td><td><code>$HOME/.cache/podman-containers</code></td><td>Build-context cache.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Dashboard</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>POD_SERVER_API_KEY</code></td><td>generated</td><td>Dashboard unlock key. <code>pod server start</code> generates one when empty.</td></tr>
+              <tr><td><code>POD_SERVER_PORT</code></td><td><code>1337</code></td><td>Port the dashboard binds on <code>0.0.0.0</code>.</td></tr>
+              <tr><td><code>POD_SERVER_FORCE_SECURE_COOKIE</code></td><td>unset</td><td>Set to <code>1</code> when terminating TLS at a reverse proxy so session cookies get the <code>Secure</code> flag.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Optional integrations</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Variable</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>POD_BENCH_JUDGE_MODEL</code><br><code>POD_BENCH_JUDGE_BASE_URL</code><br><code>POD_BENCH_JUDGE_API_KEY</code></td><td>Judge LLM for <code>pod bench</code>. Each falls back to the core value above, so zero config judges with the same local model that did the work. Point at a stronger model for more discriminating scores.</td></tr>
+              <tr><td><code>POD_BENCH_TIMEOUT</code></td><td>Per-pod wall-clock budget in seconds, overriding the task's <code>BENCH_TIMEOUT</code>.</td></tr>
+              <tr><td><code>POD_FORGEJO_URL</code><br><code>POD_FORGEJO_USER</code><br><code>POD_FORGEJO_EMAIL</code><br><code>POD_FORGEJO_TOKEN</code></td><td>Enables the <code>forgejo-workflow</code> skill: API repo creation plus token-authenticated HTTPS push. Generate the token with <code>repo</code> scope.</td></tr>
+              <tr><td><code>POD_WEB_BROWSER</code></td><td>Enables the <code>web</code> skill via a Cloakbrowser/CDP service.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>What each pod receives</h3>
+        <p>The Quadlet template exports these into every container, so a wrapped agent works without extra configuration:</p>
+        <div class="batch-panel">
+<pre><code>OPENAI_BASE_URL     OPENAI_API_BASE     OPENAI_API_KEY
+ANTHROPIC_BASE_URL  ANTHROPIC_API_KEY   ANTHROPIC_MODEL
+LLM                 DEFAULT_MODEL_CONTEXT_SIZE
+FORGEJO_URL / _USER / _EMAIL / _TOKEN     (when configured)</code></pre>
+        </div>
+        <p>
+          <code>ANTHROPIC_BASE_URL</code> is your endpoint with <code>/v1</code> stripped, which is
+          how Anthropic-SDK agents (Claude Code, Command Code) are redirected at a local server.
+        </p>
+      </section>
+
+      <!-- ── Commands ────────────────────────────────────────────────── -->
+      <section class="docs-section" id="commands">
+        <p class="section-kicker">Command reference</p>
+        <h2>Every action</h2>
+
+        <h3>Lifecycle</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>pod start &lt;agent&gt; [inst]</code></td><td>Create and start a pod. Builds the image if missing; auto-names the instance (<code>dev</code>, then greek letters) when omitted.</td></tr>
+              <tr><td><code>pod stop &lt;agent&gt; &lt;inst&gt;</code></td><td>Stop the service. Workspace untouched.</td></tr>
+              <tr><td><code>pod restart &lt;agent&gt; &lt;inst&gt;</code></td><td>Regenerate config + restart. Use after changing <code>.env</code>.</td></tr>
+              <tr><td><code>pod status</code> / <code>pod stats</code></td><td>systemd status; live <code>podman stats</code> stream.</td></tr>
+              <tr><td><code>pod remove &lt;agent&gt; &lt;inst&gt;</code></td><td>Disable the service, <strong>keep</strong> the workspace.</td></tr>
+              <tr><td><code>pod delete &lt;agent&gt; &lt;inst&gt;</code></td><td>Disable the service and <strong>delete</strong> the workspace. Destructive.</td></tr>
+              <tr><td><code>pod remove-all</code> / <code>pod delete-all</code></td><td>Same, across every managed pod.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Interaction</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>pod join &lt;agent&gt; [inst]</code></td><td>Attach to the agent's tmux session — the normal way to work with an agent. Instance may be omitted to auto-select the first running pod.</td></tr>
+              <tr><td><code>pod enter</code> / <code>pod it</code></td><td><code>enter</code> is an alias of <code>join</code>; <code>it</code> drops you into a plain shell instead of the agent.</td></tr>
+              <tr><td><code>pod tmux [inst]</code></td><td>Tiled grid with one pane per running pod — fleet-wide visual telemetry.</td></tr>
+              <tr><td><code>pod config</code></td><td>Interactive <code>POD_*</code> editor. <code>--missing-only</code> prompts only for unset values.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Images</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>pod prebuild [agent]</code></td><td>Build images ahead of time so later <code>start</code> is instant. Skips images that already exist unless <code>--no-cache</code>.</td></tr>
+              <tr><td><code>pod update [agent] [inst]</code></td><td><strong>Fetches the latest agent package</strong> and restarts. Defaults to <code>--no-cache</code> so the <code>npm install</code> layer really re-runs; pass <code>--cached</code> for a fast rebuild from existing layers.</td></tr>
+              <tr><td><code>pod self-update</code></td><td>Update the manager itself from the release channel. Refuses to downgrade; your <code>.env</code> and custom plugins are preserved.</td></tr>
+              <tr><td><code>pod cache-clean</code></td><td>Drop the build cache and all <code>localhost/*-agent-*</code> images.</td></tr>
+              <tr><td><code>pod base &lt;image&gt;</code></td><td>Set the default base image (<code>alpine</code>, <code>trixie-slim</code>, or explicit).</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Per-invocation overrides</h3>
+        <p>These flags work on <code>start</code>, <code>restart</code>, <code>enter</code>, and friends. They never touch <code>.env</code> — they apply to that one call.</p>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+            <tbody>
+              <tr><td><code>--model NAME</code></td><td>Override the model for this pod, regenerating the agent's config.</td></tr>
+              <tr><td><code>--endpoint URL</code></td><td>Point at a different inference server.</td></tr>
+              <tr><td><code>--api-key KEY</code></td><td>Override the key. <code>--api_key</code> and <code>--apikey</code> also accepted.</td></tr>
+              <tr><td><code>--ports H:C[,…]</code></td><td>Publish container ports, e.g. <code>--ports 3000:3000</code> for a dev server.</td></tr>
+              <tr><td><code>--workspace DIR</code></td><td>Use a subdirectory (or absolute path) as the pod's working directory.</td></tr>
+              <tr><td><code>--memory VALUE</code> / <code>--cpu VALUE</code></td><td>Quadlet <code>MemoryMax=</code> / <code>CPUQuota=</code>, e.g. <code>--memory 2G --cpu 1.5</code>.</td></tr>
+              <tr><td><code>--from-template NAME</code></td><td>Apply a preset from <code>templates/</code>.</td></tr>
+              <tr><td><code>--no-cache</code> / <code>--cached</code></td><td>Force a fresh image build / allow layer reuse.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Human-in-the-loop</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>pod instruct &lt;agent&gt; &lt;inst&gt; "…"</code></td><td>Queue an instruction in the pod's inbox.</td></tr>
+              <tr><td><code>pod ask &lt;agent&gt; &lt;inst&gt; "Q?" --option A --option B</code></td><td>Ask a multiple-choice question, answerable from the dashboard.</td></tr>
+              <tr><td><code>pod inbox [agent inst]</code></td><td>Read the inbox. <code>--json</code> for machine output, <code>--clear</code> to empty it.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h3>Operations</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+            <tbody>
+              <tr><td><code>pod doctor</code></td><td>Host readiness check: podman + rootless, systemd/quadlet, config layout, env, workspace writability, dashboard port, endpoint reachability, recommended tools. Exits non-zero if anything is a hard failure. <strong>Attach this to bug reports.</strong></td></tr>
+              <tr><td><code>pod test &lt;agent&gt;</code> / <code>--all</code></td><td>Smoke-test agents against the dashboard's built-in sham OpenAI/Anthropic endpoints — proves the CLI completes a round-trip without spending real tokens.</td></tr>
+              <tr><td><code>pod server {start|stop|restart|status|logs|build}</code></td><td>Manage the LAN dashboard. <code>pod server token rotate</code> prints a fresh operator token.</td></tr>
+              <tr><td><code>pod uninstall</code></td><td>Tiered removal: manager only, + config/images, or + all pod workspaces. Stops the dashboard first so its port is freed.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ── Agents ──────────────────────────────────────────────────── -->
+      <section class="docs-section" id="agents">
+        <p class="section-kicker">Agent plugins</p>
+        <h2>Shipped agents</h2>
+        <p>Each file in <code>agents/</code> is auto-discovered and becomes selectable everywhere.</p>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Agent</th><th>Binary</th><th>Local model?</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td><code>claude</code></td><td><code>claude</code></td><td>via <code>ANTHROPIC_BASE_URL</code></td><td>Claude Code. Wrapper auto-adds <code>--dangerously-skip-permissions</code>.</td></tr>
+              <tr><td><code>codex</code></td><td><code>codex</code></td><td>native</td><td>OpenAI Codex. Cleanest local integration — a <code>[model_providers.local]</code> block points straight at your endpoint.</td></tr>
+              <tr><td><code>pi</code></td><td><code>pi</code></td><td>native</td><td>Pi coding agent. Native OpenAI-compatible provider config.</td></tr>
+              <tr><td><code>opencode</code></td><td><code>opencode</code></td><td>native</td><td>Forces the Debian base (glibc binary).</td></tr>
+              <tr><td><code>crush</code></td><td><code>crush</code></td><td>native</td><td>Charm's agent. Stores history in SQLite in the workspace.</td></tr>
+              <tr><td><code>hermes</code></td><td><code>hermes</code></td><td>native</td><td>Nous Research. Closest to a raw OpenAI message log.</td></tr>
+              <tr><td><code>nanocoder</code></td><td><code>nanocoder</code></td><td>native</td><td>Runs headless via <code>--trust-directory run</code>. Keeps no persistent conversation trace (memory only).</td></tr>
+              <tr><td><code>codehamr</code></td><td><code>codehamr</code></td><td>native</td><td>Minimal local-first agent. <strong>TUI only</strong> — no headless mode, so no <code>batch</code>/<code>test</code>/<code>bench</code>.</td></tr>
+              <tr><td><code>command-code</code></td><td><code>cmd</code></td><td>via Anthropic provider</td><td>Requires <code>cmd login</code> first; pick the Anthropic provider to route locally.</td></tr>
+              <tr><td><code>antigravity</code></td><td><code>agy</code></td><td><strong>no</strong></td><td>Google's CLI. Cloud-tied: needs interactive Google sign-in and runs Google's models, ignoring your endpoint.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2>Writing your own</h2>
+        <p>
+          Drop a <code>&lt;name&gt;.sh</code> into <code>~/.pod_agents_config/agents/</code>. It's a
+          Bash fragment defining two functions plus a few variables. No registry, no restart.
+        </p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>~/.pod_agents_config/agents/my-agent.sh</span>
+            <button class="copy-button" type="button" data-copy-target="doc-agent-example">Copy</button>
+          </div>
+          <pre><code id="doc-agent-example"># Where the agent keeps its config inside the container. This directory is
+# bind-mounted from ~/Developer/my-agent-pods/&lt;inst&gt;/config/, so it persists.
+AGENT_VOLUME_CONFIG_PATH="/root/.config/my-agent"
+
+# Optional: where the shared read-only /srv/skills mount is symlinked to.
+AGENT_SKILLS_SUBPATH="skills"
+
+# Optional but recommended: one-shot invocation used by `pod batch`,
+# `pod test`, and `pod bench`. $PROMPT is injected per run. Omit this and the
+# agent is interactive-only.
+AGENT_BATCH_INVOKE='my-agent --print "$PROMPT" --yes'
+
+agent_build_containerfile() {
+    local build_dir="$1" flavor="$2"
+    # Writes the shared Node base + your chosen flavor. Pass a third argument
+    # to force a base, e.g. "trixie-slim" for glibc-only binaries.
+    write_base_node_containerfile "$build_dir" "$flavor"
+    cat &lt;&lt;'EOF' &gt;&gt; "$build_dir/Containerfile"
+RUN npm install -g my-agent &amp;&amp; npm cache clean --force
+CMD ["tail", "-f", "/dev/null"]
+EOF
+}
+
+agent_generate_config() {
+    local config_dir="$1" action="$2"
+    # "update" means "preserve the user's existing config" — always return
+    # early, or `pod update` will clobber their customizations.
+    [ "$action" = "update" ] &amp;&amp; return 0
+
+    local first_model="${DEFAULT_MODEL%%,*}"
+    cat &lt;&lt;EOF &gt; "$config_dir/config.json"
+{ "baseUrl": "$OPENAI_BASE_URL", "apiKey": "$OPENAI_API_KEY", "model": "$first_model" }
+EOF
+}
+
+# Optional: runs once per `pod update` cycle, before rebuilding.
+agent_pre_update() { podman pull docker.io/myorg/my-agent:latest; }</code></pre>
+        </div>
+        <div class="docs-callout">
+          <strong>Two gotchas worth knowing.</strong> (1) Agents whose binary is glibc-linked need
+          <code>write_base_node_containerfile "$build_dir" "$flavor" "trixie-slim"</code> — the
+          default Alpine base uses musl. (2) If the CLI refuses to act without approval prompts,
+          install a small wrapper script that injects its bypass flag, the way
+          <code>claude.sh</code> and <code>codex.sh</code> do.
+        </div>
+      </section>
+
+      <!-- ── Skills ──────────────────────────────────────────────────── -->
+      <section class="docs-section" id="skills">
+        <p class="section-kicker">Skills</p>
+        <h2>Shared, write-once capabilities</h2>
+        <p>
+          <code>~/.pod_agents_config/skills/</code> is mounted <strong>read-only</strong> at
+          <code>/srv/skills</code> in every pod, then symlinked into each agent's expected skills
+          path. Update a skill once and every agent sees it immediately.
+        </p>
+        <p>A skill is a directory with a <code>SKILL.md</code> whose front matter tells the agent when to use it:</p>
+        <div class="batch-panel">
+<pre><code>---
+name: roll-dice
+description: Roll dice using a random number generator. Use when asked to
+  roll a die (d6, d20, etc.) or generate a random dice roll.
+---
+
+To roll a die, use:
+
+```bash
+echo $((RANDOM % &lt;sides&gt; + 1))
+```</code></pre>
+        </div>
+        <p>Shipped skills: <code>roll-dice</code> (trivial example), <code>paper-lookup</code> (search 22M scientific papers), <code>forgejo-workflow</code> (create a repo and push, using your <code>POD_FORGEJO_*</code> token), and <code>web</code> (browse via a CDP service).</p>
+      </section>
+
+      <!-- ── Templates ───────────────────────────────────────────────── -->
+      <section class="docs-section" id="templates">
+        <p class="section-kicker">Templates &amp; flavors</p>
+        <h2>Presets and image layers</h2>
+
+        <h3>Templates</h3>
+        <p>A template is a <code>.conf</code> file of <code>POD_TEMPLATE_*</code> values that pre-fills the flags for a common workflow.</p>
+        <div class="batch-panel">
+<pre><code># ~/.pod_agents_config/templates/web-app.conf
+POD_TEMPLATE_FLAVOR="bun"
+POD_TEMPLATE_PORTS="3000:3000"
+POD_TEMPLATE_MEMORY="4G"
+
+# then:
+pod start codex ui --from-template web-app</code></pre>
+        </div>
+        <p>Shipped: <code>web-app</code>, <code>research</code>, <code>triage</code>, <code>refactor</code>.</p>
+
+        <h3>Flavors</h3>
+        <p>
+          A flavor is a Containerfile fragment appended to the base image — use it for toolchains
+          your agent needs. Shipped: <code>bun</code>, <code>uv</code>. Pass <code>all</code>
+          (the default) to layer every flavor, or a single name.
+        </p>
+
+        <h3>Volume bundles</h3>
+        <p>
+          A <code>.volumes</code> file is a list of Podman volume specs mounted into the pod —
+          handy for sharing a model cache or dataset across agents.
+        </p>
+      </section>
+
+      <!-- ── Batch ───────────────────────────────────────────────────── -->
+      <section class="docs-section" id="batch">
+        <p class="section-kicker">Batch prompting</p>
+        <h2>Fan a prompt list across the fleet</h2>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>batch</span>
+            <button class="copy-button" type="button" data-copy-target="doc-batch">Copy</button>
+          </div>
+          <pre><code id="doc-batch">pod batch prompts.txt                       # every running pod
+pod batch pi prompts.txt                    # only `pi` pods, sequentially
+pod batch pi dev prompts.txt --concurrent    # one pod, prompts in parallel
+
+pod batch stats                             # progress + ETA per runner
+pod batch tmux                              # live log per active runner
+pod batch log [id]                          # follow or dump a batch log
+pod batch list                              # active batch ids (--all for finished)
+pod batch stop &lt;id&gt;                         # SIGTERM the batch's runners</code></pre>
+        </div>
+        <p>
+          Input is one prompt per line (<code>#</code> comments ignored), or JSON —
+          <code>[{"prompt":"…"}, …]</code> or <code>["…", …]</code>. Runners are detached with
+          <code>nohup</code>, so they survive your shell exiting.
+        </p>
+        <p>State lives under <code>~/.pod_agents_config/batch/&lt;id&gt;/</code>: a copy of the input, <code>meta.conf</code>, one runner script and pid per pod, <code>progress/&lt;pod&gt;.prog</code> (read by <code>batch stats</code>), per-pod logs, and <code>done.&lt;pod&gt;</code> markers. <code>batch list</code> and <code>batch stats</code> hide finished and cancelled batches by default.</p>
+      </section>
+
+      <!-- ── Bench ───────────────────────────────────────────────────── -->
+      <section class="docs-section" id="bench">
+        <p class="section-kicker">Benchmarks</p>
+        <h2>Compare agents on the same task</h2>
+        <p>
+          <code>pod bench</code> runs one task across your running pods, judges each artifact with
+          an LLM against a rubric, and produces a comparable table. Runs are sequential by design:
+          on one local inference server, parallel runs contend for the GPU and every wall-clock
+          number becomes meaningless.
+        </p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>bench</span>
+            <button class="copy-button" type="button" data-copy-target="doc-bench">Copy</button>
+          </div>
+          <pre><code id="doc-bench">pod bench list                              # available tasks
+pod bench run portfolio-single-file         # every running pod with a headless mode
+pod bench run portfolio-single-file codex   # just one agent
+pod bench results portfolio-single-file     # comparison table
+pod bench export portfolio-single-file --csv &gt; results.csv</code></pre>
+        </div>
+
+        <h3>Defining a task</h3>
+        <p>Three files in <code>~/.pod_agents_config/benchmarks/&lt;task&gt;/</code>:</p>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>File</th><th>Contents</th></tr></thead>
+            <tbody>
+              <tr><td><code>task.conf</code></td><td><code>BENCH_DESCRIPTION</code>, <code>BENCH_ARTIFACT</code> (the file the agent must produce), <code>BENCH_TIMEOUT</code> in seconds.</td></tr>
+              <tr><td><code>prompt.md</code></td><td>Sent to each agent verbatim as <code>$PROMPT</code>.</td></tr>
+              <tr><td><code>criteria.md</code></td><td>The rubric handed to the judge LLM. Be specific and point-based.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Results are stored per run under <code>benchmarks/&lt;task&gt;/runs/&lt;id&gt;/&lt;pod&gt;/</code>
+          — <code>meta.json</code> (wall-clock, exit code, artifact size, and token counts where
+          the agent exposes them), <code>judge.json</code> (score + rationale + judge model),
+          the captured <code>output.log</code>, and a copy of the artifact itself. Everything is
+          diffable and easy to share in a PR.
+        </p>
+        <div class="docs-callout">
+          <strong>Judge honestly.</strong> By default the judge is the same local model that did the
+          work, which is convenient but self-favouring. For numbers you'd publish, set
+          <code>POD_BENCH_JUDGE_*</code> to a stronger or different model and say so alongside the
+          results.
+        </div>
+      </section>
+
+      <!-- ── Dashboard ───────────────────────────────────────────────── -->
+      <section class="docs-section" id="dashboard">
+        <p class="section-kicker">Dashboard &amp; auth</p>
+        <h2>The LAN dashboard</h2>
+        <p>
+          <code>pod server start</code> builds a small static Go binary (in a throwaway
+          <code>golang:alpine</code> container if you have no Go) and runs it
+          <strong>natively on the host</strong> — no podman-in-podman, no socket mounts. It binds
+          <code>0.0.0.0</code> and prints every reachable LAN URL.
+        </p>
+        <p>
+          Features: live stats with CPU/memory sparklines, idle/running activity badges, a create-pod
+          form, start/stop/restart/delete, an interactive terminal over WebSocket, journal streaming,
+          batch progress and export, the instruction inbox, notes and tags, notification center over
+          SSE, and a PWA install prompt for phones.
+        </p>
+
+        <h3>First-time auth</h3>
+        <p>The dashboard starts in <strong>viewer</strong> mode — stats and pod lists are readable, but every write is locked. To unlock operator mode:</p>
+        <div class="code-card">
+          <div class="code-card-head">
+            <span>unlock</span>
+            <button class="copy-button" type="button" data-copy-target="doc-auth">Copy</button>
+          </div>
+          <pre><code id="doc-auth">pod server token rotate    # prints a one-time operator token
+pod server restart</code></pre>
+        </div>
+        <p>
+          Click <strong>Unlock</strong> in the dashboard and paste the token. Sessions are
+          HttpOnly cookies; you can then register a <strong>passkey</strong> for future logins.
+          Lost the token? Rotate again — the old one dies, active sessions live until expiry.
+        </p>
+
+        <h3>Security model</h3>
+        <ul class="docs-list">
+          <li>Writes require operator role; reads are gated by the API key.</li>
+          <li>Origin/Host checking on every write handler (CSRF), audited as <code>csrf_blocked</code>.</li>
+          <li>Per-IP login rate limiting with exponential backoff.</li>
+          <li><code>Secure</code> cookie flag when served over TLS or when <code>POD_SERVER_FORCE_SECURE_COOKIE=1</code>.</li>
+          <li>Every write attempt appended to <code>server/audit.jsonl</code>, with rotation and pruning.</li>
+          <li>Identifiers validated and ANSI escapes stripped from command output.</li>
+        </ul>
+        <div class="docs-callout">
+          <strong>Scope.</strong> This is designed for a trusted LAN, not the open internet. If you
+          need remote access, put it behind a VPN or an authenticating reverse proxy — don't
+          port-forward it.
+        </div>
+
+        <h3>JSON API</h3>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Route</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><code>GET /api/stats</code></td><td>Cached <code>podman stats</code> JSON, refreshed every few seconds.</td></tr>
+              <tr><td><code>GET /api/pods/</code></td><td>Normalized pod list: agent, instance, states, image, ports, workspace, activity.</td></tr>
+              <tr><td><code>GET /api/info</code></td><td>Hostname, LAN IPs, server time, version.</td></tr>
+              <tr><td><code>GET /api/agents</code></td><td>Available agents, flavors, volumes, bases — read live from the config tree.</td></tr>
+              <tr><td><code>GET /api/notifications/stream</code></td><td>Server-sent events stream powering the notification center.</td></tr>
+              <tr><td><code>GET /api/update-status</code></td><td>Installed vs. remote version, for the dashboard's update card.</td></tr>
+              <tr><td><code>POST /api/action</code></td><td><code>start | stop | restart | delete | remove</code> on an existing pod.</td></tr>
+              <tr><td><code>POST /api/create</code></td><td>Create a pod from agent + instance + flavor + volumes + base.</td></tr>
+              <tr><td><code>POST /api/instruct</code></td><td>Queue an instruction for a pod.</td></tr>
+              <tr><td><code>GET /api/batches</code></td><td>Batch list, plus <code>/logs</code>, <code>/export</code>, <code>/stop</code>, <code>/delete</code> subroutes.</td></tr>
+              <tr><td><code>GET /api/terminal/ws</code></td><td>Interactive terminal over WebSocket; <code>/api/logs/ws</code> streams the journal.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ── Traces ──────────────────────────────────────────────────── -->
+      <section class="docs-section" id="traces">
+        <p class="section-kicker">Agent traces</p>
+        <h2>Where each agent stores its history</h2>
+        <p>
+          Agents persist conversations in wildly different places and formats. These were measured
+          empirically by running the same tool-using prompt through each agent — see
+          <a href="https://github.com/robvanvolt/pod-agents-manager/blob/main/TRACES.md">TRACES.md</a>
+          for the full field-by-field encoding of prompts, thinking blocks, tool calls, and results.
+        </p>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Agent</th><th>Format</th><th>Location (in pod)</th><th>Survives recreate?</th></tr></thead>
+            <tbody>
+              <tr><td><code>claude</code></td><td>JSONL events</td><td><code>/root/.claude/projects/&lt;slug&gt;/&lt;uuid&gt;.jsonl</code></td><td>yes</td></tr>
+              <tr><td><code>codex</code></td><td>JSONL rollout (dual stream)</td><td><code>/root/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</code></td><td>yes</td></tr>
+              <tr><td><code>pi</code></td><td>JSONL events</td><td><code>/root/.pi/agent/sessions/&lt;slug&gt;/*.jsonl</code></td><td>yes</td></tr>
+              <tr><td><code>hermes</code></td><td>single JSON doc</td><td><code>/opt/data/sessions/session_*.json</code></td><td>yes</td></tr>
+              <tr><td><code>crush</code></td><td>SQLite</td><td><code>/workspace/.crush/crush.db</code></td><td>yes</td></tr>
+              <tr><td><code>opencode</code></td><td>SQLite (WAL)</td><td><code>/root/.local/share/opencode/opencode.db</code></td><td><strong>no</strong> — not on a bind mount</td></tr>
+              <tr><td><code>nanocoder</code></td><td>none</td><td>memory only</td><td>—</td></tr>
+              <tr><td><code>command-code</code>, <code>antigravity</code></td><td>unknown</td><td>requires cloud sign-in first</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Codex is the richest: it writes both a high-level event log (<code>event_msg</code>) and
+          the raw model API records (<code>response_item</code>) side by side, including reasoning
+          summaries and token accounting.
+        </p>
+      </section>
+
+      <!-- ── Troubleshooting ─────────────────────────────────────────── -->
+      <section class="docs-section" id="troubleshooting">
+        <p class="section-kicker">Troubleshooting</p>
+        <h2>Common problems</h2>
+        <p>Start with <code>pod doctor</code> — it catches most misconfiguration before you dig further.</p>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Symptom</th><th>Cause &amp; fix</th></tr></thead>
+            <tbody>
+              <tr><td>Pods die when you log out</td><td>Lingering is off. <code>loginctl enable-linger $USER</code>.</td></tr>
+              <tr><td><code>pod start</code> hangs ~90s</td><td>Podman 5.0–5.7's network-wait probe. <code>pod</code> masks it automatically on first run; upgrade to 5.8+ to be rid of it.</td></tr>
+              <tr><td>Agent reports <code>EACCES</code> on its config</td><td>Host umask or SELinux labelling. <code>pod restart &lt;agent&gt; &lt;inst&gt;</code> re-normalizes permissions from inside the container.</td></tr>
+              <tr><td><code>pod update</code> doesn't change the agent version</td><td>You're on an old build where cached layers were reused. Current <code>update</code> defaults to <code>--no-cache</code>; force it with <code>pod prebuild --no-cache</code>.</td></tr>
+              <tr><td>Dashboard port already in use after reinstall</td><td>An orphaned server process. <code>pod server stop</code> sweeps orphans and whatever holds the port.</td></tr>
+              <tr><td>Agent CLI errors on an unknown flag after an upstream update</td><td>The agent changed its CLI. Check the plugin's wrapper/config in <code>agents/&lt;name&gt;.sh</code>, then <code>pod update &lt;agent&gt;</code>.</td></tr>
+              <tr><td><code>pod batch</code> skips an agent</td><td>That agent has no <code>AGENT_BATCH_INVOKE</code> (no headless mode) — <code>codehamr</code>, for example. Use it interactively.</td></tr>
+              <tr><td>Model metadata / context warnings</td><td>Set <code>POD_DEFAULT_MODEL_CONTEXT_SIZE</code> to your server's real window, then <code>pod restart</code>.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Still stuck? Open an issue with <code>pod doctor</code> output, <code>pod --version</code>,
+          <code>podman --version</code>, and the exact command plus full output.
+        </p>
+      </section>
+
+      <!-- ── Upgrading ───────────────────────────────────────────────── -->
+      <section class="docs-section" id="upgrading">
+        <p class="section-kicker">Upgrading</p>
+        <h2>Staying current</h2>
+        <div class="docs-table-wrap">
+          <table class="docs-table">
+            <thead><tr><th>Install method</th><th>Upgrade</th></tr></thead>
+            <tbody>
+              <tr><td>curl installer</td><td><code>pod self-update</code></td></tr>
+              <tr><td>Homebrew</td><td><code>brew upgrade pod-agents-manager</code></td></tr>
+              <tr><td>dev channel</td><td><code>POD_AGENTS_REF=dev pod self-update</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Upgrades replace the CLI and its modules but never your <code>.env</code> or custom
+          agents, skills, flavors, templates, and volume bundles. <code>self-update</code> refuses
+          to move you to an older version than you're running; pass an explicit
+          <code>POD_AGENTS_REF</code> if you deliberately want an older tag.
+        </p>
+        <p>
+          After upgrading, run <code>pod update</code> to also pull the latest agent CLIs into their
+          images — the manager and the agents version independently.
+        </p>
+      </section>
+
+      <section class="docs-section">
+        <div class="footer-cta">
+          <div>
+            <p class="section-kicker">Next steps</p>
+            <h2>Read the source — it's meant to be read.</h2>
+            <p>Around 3,500 lines of Bash in small numbered modules, plus a Go dashboard. Contributions for agents, flavors, skills, and benchmark tasks are welcome.</p>
+          </div>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/robvanvolt/pod-agents-manager">GitHub repository</a>
+            <a class="button secondary" href="https://github.com/robvanvolt/pod-agents-manager/blob/main/CONTRIBUTING.md">Contributing guide</a>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <p>Pod Agents Manager is licensed under Apache 2.0.</p>
+    <p><a href="./index.html">Home</a> <span aria-hidden="true">/</span> <a href="https://github.com/robvanvolt/pod-agents-manager">GitHub</a> <span aria-hidden="true">/</span> <a href="#main">Back to top</a></p>
+  </footer>
+
+  <script src="./script.js"></script>
+</body>
+</html>
