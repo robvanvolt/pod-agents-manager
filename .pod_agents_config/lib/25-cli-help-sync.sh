@@ -63,6 +63,7 @@ Actions:
   server       server {start|stop|restart|status|logs|build|token rotate}
   diagnostics  doctor
   testing      test <agent> | test --all       (smoke-test agents via sham endpoint)
+  benchmarks   bench {list|run <task> [agent [inst]]|results <task>|export <task> [--csv]}
   uninstall    uninstall
 
 Examples:
@@ -87,6 +88,8 @@ Examples:
   ${_cmd} server token rotate
   ${_cmd} test --all
   ${_cmd} test pi
+  ${_cmd} bench run portfolio-single-file
+  ${_cmd} bench results portfolio-single-file
   ${_cmd} uninstall
   ${_cmd} --version
 EOF

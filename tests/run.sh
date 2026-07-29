@@ -665,6 +665,96 @@ t_pod_errors_when_lib_missing() {
 # channel (main) can lag a dev/rsync install, and offering to "update"
 # 0.6.0 → 0.2.6 would clobber newer code. Exercise ordering, equality,
 # missing components, and the historical letter-suffix scheme (0.2.2n).
+# ----- pod bench ------------------------------------------------------------
+# Offline coverage for the benchmark suite: task packaging, list/usage paths,
+# the judge-output parser (the fragile bit — thinking models wrap the JSON in
+# reasoning), and results/export against a canned run directory. `bench run`
+# itself needs podman + a live endpoint, so it's exercised on the nuc, not here.
+
+t_bench_task_ships() {
+    local d=".pod_agents_config/benchmarks/portfolio-single-file"
+    [ -f "$d/task.conf" ] && [ -f "$d/prompt.md" ] && [ -f "$d/criteria.md" ] || {
+        echo "  canonical bench task incomplete in $d" >&2; return 1; }
+    grep -q '^BENCH_ARTIFACT=' "$d/task.conf" || { echo "  task.conf missing BENCH_ARTIFACT" >&2; return 1; }
+}
+
+t_bench_list() {
+    local sandbox out
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" bench list 2>&1)
+    rm -rf "$sandbox"
+    printf '%s' "$out" | grep -q 'portfolio-single-file' || {
+        echo "  bench list did not show the shipped task: $out" >&2; return 1; }
+}
+
+t_bench_unknown_task_errors() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" bench run definitely-not-a-task 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'Unknown or incomplete bench task'
+}
+
+t_bench_judge_parse() {
+    local sandbox
+    sandbox=$(setup_sandbox)
+    HOME="$sandbox" bash --noprofile --norc -c '
+        set -u
+        tmp_entry=$(mktemp)
+        grep -v "^complete " "$HOME/.pod_agents" > "$tmp_entry"
+        # shellcheck disable=SC1090
+        source "$tmp_entry"; rm -f "$tmp_entry"
+        # bench helpers are defined only on the bench action path; run a
+        # bench subcommand once so they exist in this shell.
+        pod bench list >/dev/null 2>&1
+
+        rc=0
+        # 1. thinking preamble + trailing JSON (the Qwen-style reply)
+        out=$(printf "<think>\nlet me grade this carefully...\n{not the answer}\n</think>\nHere is my verdict: {\"score\": 7, \"rationale\": \"solid but no theme toggle\"}" | _pod_bench_parse_judge)
+        [ "$(printf "%s" "$out" | jq -r .score)" = "7" ] || { echo "  case1 score wrong: $out" >&2; rc=1; }
+        # 2. bare JSON only
+        out=$(printf "{\"score\": 10, \"rationale\": \"perfect\"}" | _pod_bench_parse_judge)
+        [ "$(printf "%s" "$out" | jq -r .score)" = "10" ] || { echo "  case2 failed: $out" >&2; rc=1; }
+        # 3. garbage with no score object must fail
+        printf "I cannot judge this." | _pod_bench_parse_judge >/dev/null 2>&1 && { echo "  case3 should have failed" >&2; rc=1; }
+        exit "$rc"
+    '
+    local rc=$?
+    rm -rf "$sandbox"
+    return "$rc"
+}
+
+t_bench_results_empty() {
+    local sandbox out rc
+    sandbox=$(setup_sandbox)
+    out=$(run_pod_in_sandbox "$sandbox" bench results portfolio-single-file 2>&1)
+    rc=$?
+    rm -rf "$sandbox"
+    [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'No runs yet'
+}
+
+t_bench_export_canned() {
+    command -v jq >/dev/null 2>&1 || { printf '  jq not installed; skipping\n'; return 0; }
+    local sandbox rd out
+    sandbox=$(setup_sandbox)
+    rd="$sandbox/.pod_agents_config/benchmarks/portfolio-single-file/runs/20260701-000000/codex-bench"
+    mkdir -p "$rd"
+    printf '{"task":"portfolio-single-file","run_id":"20260701-000000","agent":"codex","instance":"bench","wall_seconds":123,"exit_code":0,"artifact":"index.html","artifact_bytes":4567}' > "$rd/meta.json"
+    printf '{"score": 8, "rationale": "good", "judge_model": "test"}' > "$rd/judge.json"
+
+    out=$(run_pod_in_sandbox "$sandbox" bench export portfolio-single-file 2>/dev/null)
+    printf '%s' "$out" | jq -e '.[0].score == 8 and .[0].wall_seconds == 123' >/dev/null || {
+        echo "  JSON export wrong: $out" >&2; rm -rf "$sandbox"; return 1; }
+
+    out=$(run_pod_in_sandbox "$sandbox" bench export portfolio-single-file --csv 2>/dev/null)
+    printf '%s\n' "$out" | head -1 | grep -q 'run_id.*score' || {
+        echo "  CSV header missing: $out" >&2; rm -rf "$sandbox"; return 1; }
+    printf '%s\n' "$out" | grep -q '"codex"' || {
+        echo "  CSV row missing: $out" >&2; rm -rf "$sandbox"; return 1; }
+    rm -rf "$sandbox"
+}
+
 t_version_lt_unit() {
     local sandbox
     sandbox=$(setup_sandbox)
@@ -1011,6 +1101,12 @@ run_test "api-key flag: missing value errors"     t_api_key_flag_missing_value_e
 run_test "alias: custom .cmd_name binds func"  t_alias_custom_name
 run_test "unit: inner helper functions"        t_helpers_unit
 run_test "unit: _pod_version_lt ordering"      t_version_lt_unit
+run_test "bench: canonical task ships"         t_bench_task_ships
+run_test "bench: list shows shipped task"      t_bench_list
+run_test "bench: unknown task errors"          t_bench_unknown_task_errors
+run_test "bench: judge parse (think noise)"    t_bench_judge_parse
+run_test "bench: results empty-friendly"       t_bench_results_empty
+run_test "bench: export JSON + CSV"            t_bench_export_canned
 run_test "template: start --from-template resolution" t_pod_template_resolution
 run_test "inbox: instruct queues JSONL"        t_inbox_instruct_queues
 run_test "inbox: ask queues options"           t_inbox_ask_queues_options

@@ -122,6 +122,6 @@ else
     fi
     eval "${_pod_user_cmd_name}() { _pod_agents_main \"\$@\"; }"
     # `complete` is bash-only; silence it under zsh / non-interactive shells.
-    complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --from-template --no-cache --cached --all -h -v" "$_pod_user_cmd_name" 2>/dev/null || true
+    complete -W "start stop restart update self-update prebuild status stats remove delete remove-all delete-all join enter it tmux config batch inbox ask instruct server token base cache-clean doctor test bench uninstall quit help version --help --version --model --endpoint --api-key --api_key --apikey --ports --workspace --from-template --no-cache --cached --all -h -v" "$_pod_user_cmd_name" 2>/dev/null || true
     unset _pod_user_cmd_name
 fi
